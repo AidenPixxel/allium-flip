@@ -153,7 +153,8 @@ mod tests {
 
         // A display.json written before night mode existed must still load, or `load` deletes it
         // and resets every display setting.
-        let legacy = r#"{"luminance":40,"hue":50,"saturation":50,"contrast":50,"r":50,"g":50,"b":50}"#;
+        let legacy =
+            r#"{"luminance":40,"hue":50,"saturation":50,"contrast":50,"r":50,"g":50,"b":50}"#;
         let parsed: DisplaySettings = serde_json::from_str(legacy).unwrap();
         assert_eq!(parsed.luminance, 40);
         assert!(!parsed.night_mode);

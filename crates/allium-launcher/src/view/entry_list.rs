@@ -502,8 +502,9 @@ where
                             // Only persist an override when the user actually changed the core;
                             // writing it unconditionally would pin the game to whatever happened
                             // to be the console default at the time.
-                            if let (Some(selection), Entry::Game(game)) = (self.core.as_ref(), entry)
+                            if let Some(selection) = self.core.as_ref()
                                 && selection.core != selection.original
+                                && let Entry::Game(game) = entry
                             {
                                 let db = self.res.get::<Database>();
                                 let core = &selection.cores[selection.core];

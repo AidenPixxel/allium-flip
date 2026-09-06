@@ -545,9 +545,9 @@ impl AlliumD<DefaultPlatform> {
         action
     }
 
-    /// Power back down after a charger-triggered boot, unless the user is actually trying to turn
-    /// the device on. We can't tell those two apart — both just look like "charging at startup" —
-    /// so wait briefly for a keypress first. The screen stays dark throughout.
+    /// Power back down after a charger-triggered boot, unless the user is actually trying to
+    /// turn the device on. We can't tell those two apart -- both look like "charging at
+    /// startup" -- so wait briefly for a keypress first. The screen stays dark throughout.
     #[cfg(unix)]
     async fn handle_charging_power_off(&mut self) -> Result<()> {
         info!("charging, powering off unless a key is pressed");
