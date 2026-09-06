@@ -77,6 +77,17 @@ pub trait Platform {
         true
     }
 
+    /// Discard any input queued since the last poll.
+    ///
+    /// The kernel gives every open handle on the input device its own buffer and copies each event
+    /// into all of them, freeing space only as each is read. A consumer whose handle sits idle --
+    /// the in-game menu's, between sessions -- therefore has an entire play session's keypresses
+    /// waiting for it, and would act on all of them at once. Call this before acting on input
+    /// after any long pause.
+    fn flush_input(&mut self) -> Result<()> {
+        Ok(())
+    }
+
     fn daemon(&self) {}
 }
 

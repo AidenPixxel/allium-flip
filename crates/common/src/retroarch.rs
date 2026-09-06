@@ -65,6 +65,17 @@ impl RetroArchCommand {
         Ok(())
     }
 
+    /// Sends, logging instead of returning an error.
+    ///
+    /// For callers where a failure must not propagate: RetroArch may simply not be listening yet,
+    /// and in alliumd a bubbled error terminates the daemon, which the init script recovers from
+    /// by rebooting the device.
+    pub async fn send_or_log(&self) {
+        if let Err(e) = self.send().await {
+            error!("failed to send {} to RetroArch: {}", self.as_str(), e);
+        }
+    }
+
     pub async fn send_recv(&self) -> Result<Option<String>> {
         debug!("Sending and awaiting RetroArch command: {}", self.as_str(),);
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
