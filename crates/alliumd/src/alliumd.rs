@@ -374,7 +374,7 @@ impl AlliumD<DefaultPlatform> {
                         info!("menu finished, resuming game");
                         self.menu_open = false;
                         self.is_menu_pressed_alone = false;
-                        RetroArchCommand::Unpause.send().await?;
+                        RetroArchCommand::Unpause.send_or_log().await;
                     }
                     _ = tokio::time::sleep(auto_sleep_duration) => {
                         if !self.power_settings.auto_sleep_when_charging && battery.charging() {
@@ -540,10 +540,12 @@ impl AlliumD<DefaultPlatform> {
                             }
                         });
 
-                        if info.is_some() {
-                            RetroArchCommand::Pause.send().await?;
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        }
+                        // Pause regardless of whether GetInfo answered. A timeout only means
+                        // RetroArch was too busy to reply within 250ms, not that it is absent --
+                        // and leaving it running would let it repaint straight over the menu,
+                        // which looks exactly like the menu button having done nothing.
+                        RetroArchCommand::Pause.send_or_log().await;
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
                         // The plate would keep re-flushing over the menu until its timeout
                         self.hide_osd();
@@ -551,7 +553,9 @@ impl AlliumD<DefaultPlatform> {
                         self.menu_open = true;
                         if self.menu.tx.send(info).is_err() {
                             error!("failed to send to menu thread");
-                            self.menu_open = false;
+                            RetroArchCommand::Unpause.send_or_log().await;
+                        } else {
+                            self.menu_open = true;
                         }
                     }
                     self.is_menu_pressed_alone = false;

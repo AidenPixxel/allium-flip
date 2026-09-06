@@ -69,6 +69,15 @@ impl Platform for MiyooPlatform {
         self.keys.poll().await
     }
 
+    fn flush_input(&mut self) -> Result<()> {
+        // Re-opening is the only way to be certain the backlog is gone: the kernel hands a fresh,
+        // empty buffer to each new open. Draining by reading would race whatever arrives mid-drain,
+        // and would leave any pending SYN_DROPPED -- and the event stream's cached key state --
+        // in place.
+        self.keys = EvdevKeys::new()?;
+        Ok(())
+    }
+
     fn display(&mut self) -> Result<FramebufferDisplay> {
         FramebufferDisplay::new()
     }

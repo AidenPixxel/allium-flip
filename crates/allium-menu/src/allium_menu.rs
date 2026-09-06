@@ -89,6 +89,15 @@ impl AlliumMenu<DefaultPlatform> {
         }
         self.display.save()?;
 
+        // This process holds its own handle on the input device and does not read it between menu
+        // sessions, so the kernel has been queuing every key the game consumed -- including the
+        // MENU press that opened this menu, which IngameMenu treats as "close". Drop all of it
+        // here, after the display setup above, so the first event handled is one the user meant
+        // for the menu.
+        if let Err(e) = self.platform.flush_input() {
+            warn!("failed to flush stale input: {}", e);
+        }
+
         let (tx, mut rx) = tokio::sync::mpsc::channel(100);
 
         let mut should_exit = false;
