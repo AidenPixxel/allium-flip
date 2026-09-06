@@ -28,6 +28,9 @@ pub struct EntryListState<S> {
 #[derive(Debug)]
 pub struct CoreSelection {
     core: usize,
+    /// The core that was already in effect when the menu was opened, so we only
+    /// write a per-game override when the user actually picked something else.
+    original: usize,
     cores: Vec<String>,
 }
 
@@ -254,7 +257,9 @@ where
                     .map(|c| c.cores.clone())
                     .unwrap_or_default();
 
-                if !cores.is_empty() {
+                // With only one core there is nothing to pick, so keep the plain "Launch"
+                // label rather than implying a choice that doesn't exist.
+                if cores.len() > 1 {
                     let core = game.core.to_owned().unwrap_or_else(|| cores[0].clone());
                     let i = cores.iter().position(|c| c == &core).unwrap_or_default();
 
@@ -263,7 +268,11 @@ where
                         *launch_core = Some(console_mapper.get_core_name(&core));
                     }
 
-                    self.core = Some(CoreSelection { core: i, cores });
+                    self.core = Some(CoreSelection {
+                        core: i,
+                        original: i,
+                        cores,
+                    });
                 } else {
                     self.core = None;
                 }
@@ -490,9 +499,14 @@ where
                         }
                         MenuEntry::Launch(_) => {
                             let entry = self.entries.get_mut(self.list.selected()).unwrap();
-                            if let (Some(core), Entry::Game(game)) = (self.core.as_ref(), entry) {
+                            // Only persist an override when the user actually changed the core;
+                            // writing it unconditionally would pin the game to whatever happened
+                            // to be the console default at the time.
+                            if let (Some(selection), Entry::Game(game)) = (self.core.as_ref(), entry)
+                                && selection.core != selection.original
+                            {
                                 let db = self.res.get::<Database>();
-                                let core = &core.cores[core.core];
+                                let core = &selection.cores[selection.core];
                                 db.set_core(&game.path, core)?;
                                 game.core = Some(core.to_string());
                             }
