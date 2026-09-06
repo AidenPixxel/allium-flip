@@ -1,0 +1,219 @@
+mod battery_icon;
+mod battery_indicator;
+mod button_hint;
+mod button_hints;
+mod button_icon;
+mod clock;
+mod image;
+mod input;
+mod label;
+mod list;
+mod null;
+mod row;
+mod scroll_list;
+mod search;
+mod settings_list;
+mod status_bar;
+mod wifi_icon;
+mod wifi_indicator;
+
+use std::collections::VecDeque;
+use std::fmt;
+use std::time::Duration;
+
+pub use self::battery_icon::BatteryIcon;
+pub use self::battery_indicator::BatteryIndicator;
+pub use self::button_hint::ButtonHint;
+pub use self::button_hints::ButtonHints;
+pub use self::button_icon::ButtonIcon;
+pub use self::clock::Clock;
+pub use self::image::{Image, ImageMode};
+pub use self::input::button::Button;
+pub use self::input::color_picker::ColorPicker;
+pub use self::input::datetime::DateTime;
+pub use self::input::keyboard::Keyboard;
+pub use self::input::number::Number;
+pub use self::input::percentage::Percentage;
+pub use self::input::select::Select;
+pub use self::input::text_box::TextBox;
+pub use self::input::toggle::Toggle;
+pub use self::label::Label;
+pub use self::list::List;
+pub use self::null::NullView;
+pub use self::row::Row;
+pub use self::scroll_list::ScrollList;
+pub use self::search::{SearchState, SearchView};
+pub use self::settings_list::SettingsList;
+pub use self::status_bar::StatusBar;
+pub use self::wifi_icon::WifiIcon;
+pub use self::wifi_indicator::WifiIndicator;
+
+use anyhow::Result;
+use async_trait::async_trait;
+use tokio::sync::mpsc::Sender;
+
+use crate::command::Command;
+use crate::geom::{Point, Rect};
+use crate::platform::{DefaultPlatform, KeyEvent, Platform};
+use crate::stylesheet::Stylesheet;
+
+#[async_trait(?Send)]
+pub trait View {
+    /// Update the view.
+    fn update(&mut self, dt: Duration) {
+        self.children_mut().iter_mut().for_each(|c| c.update(dt));
+    }
+
+    /// Draw the view. Returns true if the view was drawn.
+    fn draw(
+        &mut self,
+        display: &mut <DefaultPlatform as Platform>::Display,
+        styles: &Stylesheet,
+    ) -> Result<bool>;
+
+    /// Returns true if the view should be drawn.
+    fn should_draw(&self) -> bool;
+
+    /// Sets whether the view should be drawn.
+    fn set_should_draw(&mut self);
+
+    /// Handle a key event. Returns true if the event was consumed.
+    async fn handle_key_event(
+        &mut self,
+        event: KeyEvent,
+        // Sends to the root.
+        commands: Sender<Command>,
+        // Bubbles the signal upwards, starting from the parent view to the top.
+        bubble: &mut VecDeque<Command>,
+    ) -> Result<bool>;
+
+    /// Returns a list of references to the children of the view.
+    fn children(&self) -> Vec<&dyn View>;
+
+    /// Returns a list of mutable references to the children of the view.
+    fn children_mut(&mut self) -> Vec<&mut dyn View>;
+
+    /// Get the bounding box of the view.
+    fn bounding_box(&mut self, styles: &Stylesheet) -> Rect {
+        self.children_mut()
+            .iter_mut()
+            .map(|c| c.bounding_box(styles))
+            .fold(Rect::zero(), |acc, r| acc.union(&r))
+    }
+
+    /// Sets the position of the view.
+    fn set_position(&mut self, point: Point);
+
+    /// Called when the view gains focus.
+    fn focus(&mut self) {}
+
+    /// Called when the view loses focus.
+    fn blur(&mut self) {}
+}
+
+impl fmt::Debug for dyn View {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "View")
+    }
+}
+
+/// Draw debug bounding boxes around the UI tree.
+#[cfg(feature = "debug-ui")]
+pub fn draw_debug_bounds(
+    view: &mut dyn View,
+    display: &mut <DefaultPlatform as Platform>::Display,
+    styles: &Stylesheet,
+    depth: usize,
+) -> Result<()> {
+    use crate::display::color::Color;
+    use crate::display::{Display, stroke_rect};
+
+    // Generate a color based on depth for visual distinction
+    let colors = [
+        Color::new(255, 0, 0),   // Red
+        Color::new(0, 255, 0),   // Green
+        Color::new(0, 0, 255),   // Blue
+        Color::new(255, 255, 0), // Yellow
+        Color::new(255, 0, 255), // Magenta
+        Color::new(0, 255, 255), // Cyan
+    ];
+    let color = colors[depth % colors.len()];
+
+    let rect = view.bounding_box(styles);
+    if rect.w > 0 && rect.h > 0 {
+        // Draw rectangle border using path stroking
+        stroke_rect(&mut display.pixmap_mut(), rect, 1.0, color);
+    }
+
+    // Recursively draw children
+    for child in view.children_mut() {
+        draw_debug_bounds(child, display, styles, depth + 1)?;
+    }
+
+    Ok(())
+}
+
+#[async_trait(?Send)]
+impl View for Box<dyn View> {
+    fn update(&mut self, dt: Duration) {
+        (**self).update(dt)
+    }
+
+    fn draw(
+        &mut self,
+        display: &mut <DefaultPlatform as Platform>::Display,
+        styles: &Stylesheet,
+    ) -> Result<bool> {
+        (**self).draw(display, styles)
+    }
+
+    fn should_draw(&self) -> bool {
+        (**self).should_draw()
+    }
+
+    fn set_should_draw(&mut self) {
+        (**self).set_should_draw()
+    }
+
+    /// Handle a key event. Returns true if the event was consumed.
+    async fn handle_key_event(
+        &mut self,
+        event: KeyEvent,
+        // Sends to the root.
+        commands: Sender<Command>,
+        // Bubbles the signal upwards, starting from the parent view to the top.
+        bubble: &mut VecDeque<Command>,
+    ) -> Result<bool> {
+        (**self).handle_key_event(event, commands, bubble).await
+    }
+
+    /// Returns a list of references to the children of the view.
+    fn children(&self) -> Vec<&dyn View> {
+        (**self).children()
+    }
+
+    /// Returns a list of mutable references to the children of the view.
+    fn children_mut(&mut self) -> Vec<&mut dyn View> {
+        (**self).children_mut()
+    }
+
+    /// Get the bounding box of the view.
+    fn bounding_box(&mut self, styles: &Stylesheet) -> Rect {
+        (**self).bounding_box(styles)
+    }
+
+    /// Sets the position of the view.
+    fn set_position(&mut self, point: Point) {
+        (**self).set_position(point)
+    }
+
+    /// Called when the view gains focus.
+    fn focus(&mut self) {
+        (**self).focus()
+    }
+
+    /// Called when the view loses focus.
+    fn blur(&mut self) {
+        (**self).blur()
+    }
+}

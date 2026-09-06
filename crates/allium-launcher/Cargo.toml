@@ -1,0 +1,44 @@
+[package]
+name = "allium-launcher"
+version = "1.0.1"
+edition = "2024"
+include = ["/src"]
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+simulator = ["common/simulator"]
+miyoo = ["common/miyoo"]
+debug-ui = ["common/debug-ui"] # Draw bounding boxes
+debug-ui-redraw = [] # Show only redraws
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+tiny-skia.workspace = true
+enum-map.workspace = true
+image = { workspace = true, features = ["gif", "jpeg", "png"] }
+itertools.workspace = true
+lazy_static.workspace = true
+log = { workspace = true, features = ["release_max_level_info"] }
+qrcode.workspace = true
+quick-xml = { workspace = true, features = ["serde", "serialize"] }
+rand.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serial_test.workspace = true
+sha2.workspace = true
+simple_logger = { workspace = true, default-features = false }
+strum.workspace = true
+sysinfo.workspace = true
+tokio = { workspace = true, features = ["full"] }
+toml.workspace = true
+type-map.workspace = true
+const-hex.workspace = true
+
+[dependencies.common]
+path = "../common"

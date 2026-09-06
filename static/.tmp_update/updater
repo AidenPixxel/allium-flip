@@ -1,0 +1,95 @@
+#!/bin/sh
+export ROOT="/mnt/SDCARD"
+export LD_LIBRARY_PATH="/lib:/config/lib:/customer/lib:$ROOT/miyoo:$ROOT/.tmp_update/lib"
+export PATH="$ROOT/.tmp_update/bin:$PATH"
+
+# init backlight
+echo 0 >/sys/class/pwm/pwmchip0/export
+echo 800 >/sys/class/pwm/pwmchip0/pwm0/period
+echo 6 >/sys/class/pwm/pwmchip0/pwm0/duty_cycle
+echo 1 >/sys/class/pwm/pwmchip0/pwm0/enable
+
+# init lcd
+cat /proc/ls
+sleep 0.25
+
+# restore timezone
+if [ -f $ROOT/.allium/state/timezone ]; then
+    export TZ
+    TZ="$(cat $ROOT/.allium/state/timezone)"
+fi
+
+# check for OTA update
+if [ -f "$ROOT/allium-ota.zip" ]; then
+    "$ROOT/.allium/scripts/ota-update.sh"
+fi
+
+# perform model-specific logic
+if [ -e /dev/input/event1 ]; then
+    export MODEL=285
+
+    # Clear loading screen
+    show -c
+
+    # Noop /etc/profile
+    echo "#!/bin/sh" >/tmp/profile
+    mount -o bind /tmp/profile /etc/profile
+
+    # kill default telnetd. Allium will launch its own if needed
+    killall telnetd
+elif [ -f /customer/app/axp_test ]; then
+    export MODEL=354
+
+    # kill default telnetd. Allium will launch its own if needed
+    killall telnetd
+else
+    export MODEL=283
+
+    # init charger detection
+    if [ ! -f /sys/devices/gpiochip0/gpio/gpio59/direction ]; then
+        echo 59 >/sys/class/gpio/export
+        echo in >/sys/devices/gpiochip0/gpio/gpio59/direction
+    fi
+
+    # add a loopback address for RA network interface
+    ip addr add 127.0.0.1/8 dev lo
+    ifconfig lo up
+fi
+
+# use audioserver to prevent pop-noise
+if [ -f "$ROOT"/.tmp_update/script/start_audioserver.sh ]; then
+    "$ROOT"/.tmp_update/script/start_audioserver.sh
+fi
+
+# run migration scripts that haven't been run yet
+for script in "$ROOT"/.allium/migrations/*; do
+    if [ ! -f "$script/.done" ]; then
+        show -c
+        say "$(cat "$script"/name.txt)"
+        if ! "$script/run.sh" >"$script/run.log"; then
+            # stop everything if migration fails
+            show -c
+            say "Installation failed. Please reinstall Allium."
+            reboot
+            sleep 10
+        fi
+        touch "$script/.done"
+    fi
+done
+show -c
+
+# run Allium
+RUST_LOG=info "$ROOT"/.allium/bin/alliumd >"$ROOT"/allium.log 2>&1
+
+if [ -f "$ROOT"/.debug ]; then
+    "$ROOT"/.allium/scripts/wifi-on.sh
+    "$ROOT"/.allium/scripts/telnet-on.sh
+    while true; do
+        sleep 10
+    done
+else
+    while true; do
+        reboot
+        sleep 10
+    done
+fi

@@ -1,0 +1,284 @@
+use std::collections::VecDeque;
+use std::time::Duration;
+
+use anyhow::Result;
+use async_trait::async_trait;
+use common::command::Command;
+
+use common::display::Display as DisplayTrait;
+use common::geom::{Alignment, Point, Rect};
+use common::locale::Locale;
+use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
+use common::power::{PowerButtonAction, PowerSettings, VolumeOnStartup};
+use common::resources::Resources;
+use common::stylesheet::Stylesheet;
+use common::view::{ButtonHint, ButtonHints, Number, Select, SettingsList, Toggle, View};
+
+use tokio::sync::mpsc::Sender;
+
+use crate::view::settings::{ChildState, SettingsChild};
+
+pub struct Power {
+    res: Resources,
+    rect: Rect,
+    power_settings: PowerSettings,
+    list: SettingsList,
+    button_hints: ButtonHints<String>,
+}
+
+impl Power {
+    pub fn new(rect: Rect, res: Resources, state: Option<ChildState>) -> Self {
+        let Rect { x, y, w, .. } = rect;
+
+        let locale = res.get::<Locale>();
+        let styles = res.get::<Stylesheet>();
+        let power_settings = PowerSettings::load().unwrap_or_default();
+
+        let auto_sleep_duration_disabled_label =
+            locale.t("settings-power-auto-sleep-duration-disabled");
+
+        let mut button_hints = ButtonHints::new(
+            res.clone(),
+            vec![],
+            vec![
+                ButtonHint::new(
+                    res.clone(),
+                    Point::zero(),
+                    Key::A,
+                    locale.t("button-edit"),
+                    Alignment::Right,
+                ),
+                ButtonHint::new(
+                    res.clone(),
+                    Point::zero(),
+                    Key::B,
+                    locale.t("button-back"),
+                    Alignment::Right,
+                ),
+            ],
+        );
+
+        let button_hints_rect = button_hints.bounding_box(&styles);
+        let list_height = (button_hints_rect.y - y) as u32;
+
+        let mut buttons: Vec<(String, Box<dyn View>)> = vec![
+            (
+                locale.t("settings-power-auto-sleep-when-charging"),
+                Box::new(Toggle::new(
+                    Point::zero(),
+                    power_settings.auto_sleep_when_charging,
+                    Alignment::Right,
+                )),
+            ),
+            (
+                locale.t("settings-power-auto-sleep-duration-minutes"),
+                Box::new(Number::new(
+                    Point::zero(),
+                    power_settings.auto_sleep_duration_minutes,
+                    0,
+                    60,
+                    5,
+                    move |x: &i32| {
+                        if *x == 0 {
+                            auto_sleep_duration_disabled_label.clone()
+                        } else {
+                            x.to_string()
+                        }
+                    },
+                    Alignment::Right,
+                )),
+            ),
+            (
+                locale.t("settings-power-volume-on-startup"),
+                Box::new(Select::new(
+                    Point::zero(),
+                    power_settings.volume_on_startup as usize,
+                    vec![
+                        locale.t("settings-power-volume-on-startup-restore"),
+                        locale.t("settings-power-volume-on-startup-muted"),
+                    ],
+                    Alignment::Right,
+                )),
+            ),
+            (
+                locale.t("settings-power-power-button-action"),
+                Box::new(Select::new(
+                    Point::zero(),
+                    power_settings.power_button_action as usize,
+                    vec![
+                        locale.t("settings-power-power-button-action-suspend"),
+                        locale.t("settings-power-power-button-action-shutdown"),
+                        locale.t("settings-power-power-button-action-nothing"),
+                    ],
+                    Alignment::Right,
+                )),
+            ),
+        ];
+        if DefaultPlatform::has_lid() {
+            buttons.push((
+                locale.t("settings-power-lid-close-action"),
+                Box::new(Select::new(
+                    Point::zero(),
+                    power_settings.lid_close_action as usize,
+                    vec![
+                        locale.t("settings-power-power-button-action-suspend"),
+                        locale.t("settings-power-power-button-action-shutdown"),
+                        locale.t("settings-power-power-button-action-nothing"),
+                    ],
+                    Alignment::Right,
+                )),
+            ));
+        }
+        let (left, right) = buttons.into_iter().unzip();
+
+        let mut list = SettingsList::new(
+            res.clone(),
+            Rect::new(
+                x + styles.ui.margin_x,
+                y,
+                w - styles.ui.margin_x as u32 * 2,
+                list_height,
+            ),
+            left,
+            right,
+            styles.ui.ui_font.size + styles.ui.padding_y as u32,
+        );
+        if let Some(state) = state {
+            list.select(state.selected);
+        }
+
+        drop(locale);
+        drop(styles);
+
+        Self {
+            res,
+            rect,
+            power_settings,
+            list,
+            button_hints,
+        }
+    }
+}
+
+#[async_trait(?Send)]
+impl View for Power {
+    fn draw(
+        &mut self,
+        display: &mut <DefaultPlatform as Platform>::Display,
+        styles: &Stylesheet,
+    ) -> Result<bool> {
+        let mut drawn = false;
+
+        drawn |= self.list.should_draw() && self.list.draw(display, styles)?;
+
+        if self.button_hints.should_draw() {
+            let bbox = self.button_hints.bounding_box(styles);
+            display.load(Rect::new(
+                self.rect.x,
+                bbox.y - styles.ui.margin_x,
+                self.rect.w,
+                bbox.h,
+            ))?;
+            drawn |= self.button_hints.draw(display, styles)?;
+        }
+
+        Ok(drawn)
+    }
+
+    fn should_draw(&self) -> bool {
+        self.list.should_draw() || self.button_hints.should_draw()
+    }
+
+    fn set_should_draw(&mut self) {
+        self.list.set_should_draw();
+        self.button_hints.set_should_draw();
+    }
+
+    async fn handle_key_event(
+        &mut self,
+        event: KeyEvent,
+        commands: Sender<Command>,
+        bubble: &mut VecDeque<Command>,
+    ) -> Result<bool> {
+        if self
+            .list
+            .handle_key_event(event, commands.clone(), bubble)
+            .await?
+        {
+            while let Some(command) = bubble.pop_front() {
+                if let Command::ValueChanged(i, val) = command {
+                    match i {
+                        0 => {
+                            self.power_settings.auto_sleep_when_charging = val.as_bool().unwrap();
+                            toast_needs_restart_for_effect(&self.res, &commands).await?;
+                        }
+                        1 => {
+                            self.power_settings.auto_sleep_duration_minutes = val.as_int().unwrap();
+                            toast_needs_restart_for_effect(&self.res, &commands).await?;
+                        }
+                        2 => {
+                            self.power_settings.volume_on_startup =
+                                VolumeOnStartup::from_repr(val.as_int().unwrap() as usize)
+                                    .unwrap_or_default();
+                            toast_needs_restart_for_effect(&self.res, &commands).await?;
+                        }
+                        3 => {
+                            self.power_settings.power_button_action =
+                                PowerButtonAction::from_repr(val.as_int().unwrap() as usize)
+                                    .unwrap_or_default();
+                            toast_needs_restart_for_effect(&self.res, &commands).await?;
+                        }
+                        4 => {
+                            self.power_settings.lid_close_action =
+                                PowerButtonAction::from_repr(val.as_int().unwrap() as usize)
+                                    .unwrap_or_default();
+                            toast_needs_restart_for_effect(&self.res, &commands).await?;
+                        }
+                        _ => unreachable!("Invalid index"),
+                    }
+                    self.power_settings.save()?;
+                }
+            }
+            return Ok(true);
+        }
+
+        match event {
+            KeyEvent::Pressed(Key::B) => {
+                bubble.push_back(Command::CloseView);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn children(&self) -> Vec<&dyn View> {
+        vec![&self.list, &self.button_hints]
+    }
+
+    fn children_mut(&mut self) -> Vec<&mut dyn View> {
+        vec![&mut self.list, &mut self.button_hints]
+    }
+
+    fn bounding_box(&mut self, _styles: &Stylesheet) -> Rect {
+        self.rect
+    }
+
+    fn set_position(&mut self, _point: Point) {
+        unimplemented!()
+    }
+}
+
+async fn toast_needs_restart_for_effect(res: &Resources, commands: &Sender<Command>) -> Result<()> {
+    let message = res.get::<Locale>().t("settings-needs-restart-for-effect");
+    Ok(commands
+        .send(Command::Toast(message, Some(Duration::from_secs(5))))
+        .await?)
+}
+
+impl SettingsChild for Power {
+    fn save(&self) -> ChildState {
+        ChildState {
+            selected: self.list.selected(),
+        }
+    }
+}

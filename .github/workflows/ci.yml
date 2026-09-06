@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  style:
+    name: Check Style
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: rustfmt
+          profile: minimal
+          override: true
+
+      - name: cargo fmt -- --check
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: rustfmt
+          profile: minimal
+          override: true
+
+      - name: cargo test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --package common --package alliumd --package allium-launcher --package allium-menu
+
+  build:
+    name: Build Artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: 'recursive'
+
+      - name: Setup build toolchain
+        uses: ./.github/actions/setup-build
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: armv7-unknown-linux-gnueabihf
+
+      - name: Build target
+        run: cargo zigbuild --release --bins --target armv7-unknown-linux-gnueabihf
+
+      - name: Package
+        shell: bash
+        run: |
+          make all
+          cd dist
+          zip -r ../allium-armv7-unknown-linux-gnueabihf.zip .allium .tmp_update RetroArch Apps BIOS Roms Saves Themes
+          cd -
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: allium-armv7-unknown-linux-gnueabihf
+          path: allium-armv7-unknown-linux-gnueabihf.zip
+
+  deny:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        checks:
+          - advisories
+          - bans licenses sources
+
+    # Prevent sudden announcement of a new advisory from failing ci:
+    continue-on-error: ${{ matrix.checks == 'advisories' }}
+
+    steps:
+    - uses: actions/checkout@v5
+    - uses: EmbarkStudios/cargo-deny-action@v2
+      with:
+        command: check ${{ matrix.checks }}
+        arguments: --features miyoo

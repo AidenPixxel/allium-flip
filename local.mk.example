@@ -1,0 +1,8 @@
+# copy this to your local env with `cp local.mk.example local.mk`
+
+# Path to your SD card mount point
+# Examples:
+#   macOS:   SDCARD_PATH=/Volumes/SDCARDNAME
+#   Linux:   SDCARD_PATH=/media/user/SDCARDNAME
+
+SDCARD_PATH=/Volumes/SDCARDNAME

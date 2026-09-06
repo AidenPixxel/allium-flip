@@ -1,0 +1,30 @@
+[package]
+name = "activity-tracker"
+version = "1.0.1"
+edition = "2024"
+include = ["/src"]
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+simulator = ["common/simulator"]
+miyoo = ["common/miyoo"]
+
+[dependencies]
+anyhow.workspace = true
+tiny-skia.workspace = true
+lazy_static.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["full"] }
+strum.workspace = true
+async-trait.workspace = true
+type-map.workspace = true
+simple_logger = { workspace = true, default-features = false }
+log = { workspace = true, features = ["release_max_level_info"] }
+image = { workspace = true, features = ["gif", "jpeg", "png"] }
+chrono.workspace = true
+
+[dependencies.common]
+path = "../common"

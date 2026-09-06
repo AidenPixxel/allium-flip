@@ -1,0 +1,205 @@
+# Launcher
+tab-recents = Recents
+tab-games = Games
+tab-apps = Apps
+tab-settings = Settings
+
+sort-alphabetical = Sort: A-Z
+sort-last-played = Sort: Recent
+sort-most-played = Sort: Playtime
+sort-rating = Sort: Rating
+sort-release-date = Sort: Release Date
+sort-random = Sort: Random
+sort-search = Search
+sort-favorites = Sort: Favorites
+sort-relevance = Sort: Relevance
+
+no-recent-games = Play a game to get started
+search-games-found = 
+    { $count -> 
+        [zero] No games found
+        [one] 1 game found
+       *[other] { $count } games found
+    }
+
+populating-database = Populating database...
+    This may take several minutes.
+    Go grab a coffee!
+populating-games = Populating games... ({ $directory })
+
+menu-set-as-favorite = Set as Favorite
+menu-unset-as-favorite = Remove from Favorites
+menu-launch = Launch
+menu-launch-with-core = Launch with { $core }
+menu-reset = Reset
+menu-remove-from-recents = Remove from Recents
+menu-repopulate-database = Repopulate Database
+
+settings-wifi = Wi-Fi
+settings-wifi-wifi-enabled = Wi-Fi Enabled
+settings-wifi-ip-address = IP Address
+settings-wifi-wifi-network = Wi-Fi Network Name
+settings-wifi-wifi-password = Wi-Fi Password
+settings-wifi-ntp-enabled = NTP Enabled
+settings-wifi-web-file-explorer = Web File Explorer
+settings-wifi-telnet-enabled = Telnet Enabled
+settings-wifi-ssh-enabled = SSH Enabled
+settings-wifi-ftp-enabled = FTP Enabled
+settings-wifi-scraper = Scraper
+settings-wifi-syncthing = Syncthing Enabled
+settings-wifi-connecting= Connecting...
+
+settings-clock = Date & Time
+settings-clock-datetime = Date & Time
+settings-clock-timezone = Timezone
+
+settings-display = Display
+settings-display-luminance = Luminance
+settings-display-hue = Hue
+settings-display-contrast = Contrast
+settings-display-saturation = Saturation
+settings-display-red = Red
+settings-display-green = Green
+settings-display-blue = Blue
+settings-display-screen-resolution = Screen Resolution
+
+settings-theme = Theme
+settings-theme-theme = Theme
+settings-theme-wallpaper = Wallpaper
+settings-theme-restore-defaults = Restore Defaults
+settings-theme-dark-mode = Dark Mode
+settings-theme-show-battery-level = Battery Percentage
+settings-theme-show-clock = Clock
+settings-theme-show-wifi = Wi-Fi Icon
+settings-theme-use-recents-carousel = Recents Carousel
+settings-theme-boxart-width = Boxart Width
+settings-theme-boxart-underlay = Boxart Underlay
+settings-theme-boxart-border-radius = Boxart Border Radius
+settings-theme-ui-font = UI Font
+settings-theme-ui-font-size = UI Font Size
+settings-theme-guide-font = Guide Font
+settings-theme-guide-font-size = Guide Font Size
+settings-theme-tab-font-size = Tab Font Size
+settings-theme-status-bar-font-size = Status Bar Font Size
+settings-theme-button-hint-font-size = Button Hint Font Size
+settings-theme-button-size = Button Size
+settings-theme-button-text-font-size = Button Text Font Size
+settings-theme-highlight-color = Highlight Color
+settings-theme-highlight-text-color = Highlight Text Color
+settings-theme-foreground-color = Foreground Color
+settings-theme-background-color = Background Color
+settings-theme-disabled-color = Disabled Color
+settings-theme-tab-color = Tab Color
+settings-theme-tab-selected-color = Tab Selected Color
+settings-theme-tabs-backdrop-color = Tabs Backdrop Color
+settings-theme-mirror-tabs-and-status = Mirror Tabs And Status
+settings-theme-button-a-color = Button A Color
+settings-theme-button-b-color = Button B Color
+settings-theme-button-x-color = Button X Color
+settings-theme-button-y-color = Button Y Color
+settings-theme-button-text-color = Button Text Color
+settings-theme-button-hint-text-color = Button Hint Text Color
+settings-theme-stroke-color = Text Stroke Color
+settings-theme-highlight-text-stroke-color = Highlight Text Stroke Color
+settings-theme-tab-stroke-color = Tab Stroke Color
+settings-theme-tab-selected-stroke-color = Tab Selected Stroke Color
+settings-theme-status-bar-color = Status Bar Color
+settings-theme-status-backdrop-color = Status Backdrop Color
+settings-theme-hide-status-in-launcher = Hide Status In Launcher
+settings-theme-status-bar-stroke-color = Status Bar Stroke Color
+settings-theme-stroke-width = Stroke Width
+settings-theme-margin-x = Horizontal Margin
+settings-theme-margin-y = Vertical Margin
+settings-theme-list-margin = List Margin
+settings-theme-padding-x = Horizontal Padding
+settings-theme-padding-y = Vertical Padding
+
+settings-language = Language
+settings-language-language = Language
+
+settings-about = About
+
+settings-power = Power
+settings-power-power-button-action = Power Button Action
+settings-power-power-button-action-suspend = Suspend
+settings-power-power-button-action-shutdown = Shutdown
+settings-power-power-button-action-nothing = Nothing
+settings-power-lid-close-action = Lid Close Action
+settings-power-auto-sleep-when-charging = Auto Sleep When Charging
+settings-power-auto-sleep-duration-minutes = Auto Sleep Duration (Minutes)
+settings-power-auto-sleep-duration-disabled = Disabled
+settings-power-volume-on-startup = Volume on Startup
+settings-power-volume-on-startup-restore = Restore
+settings-power-volume-on-startup-muted = Muted
+
+settings-files = Files
+
+settings-system-update-menu = System Update
+settings-system-allium-version = Allium Version
+settings-system-latest-version = Latest Version
+settings-system-model-name = Model Name
+settings-system-firmware-version = Firmware Version
+settings-system-operating-system-version = OS Version
+settings-system-kernel-version = Kernel Version
+settings-system-memory-used = Memory Used
+settings-system-update-channel = Update Channel
+settings-system-update-channel-stable = Stable
+settings-system-update-channel-nightly = Nightly
+settings-system-update = System Update
+settings-system-update-check = Check for Updates
+settings-system-update-checking = Checking...
+settings-system-update-available = Download Update
+settings-system-update-downloading = Downloading...
+settings-system-update-restart-to-update = Restart to Update
+settings-system-update-installing = Installing...
+settings-system-update-up-to-date = Up to Date
+settings-system-update-restart-required = Restart the device to install the update.
+settings-system-unknown-value = Unknown
+
+settings-needs-restart-for-effect =
+    You need to restart the device
+    for changes to take effect.
+
+# Menu
+ingame-menu-continue = Continue
+ingame-menu-save = Save
+ingame-menu-load = Load
+ingame-menu-reset = Reset
+ingame-menu-settings = Settings
+ingame-menu-guide = Guide
+ingame-menu-quit = Quit
+ingame-menu-slot = Slot { $slot }
+ingame-menu-slot-auto = Auto
+ingame-menu-disk = Disk { $disk }
+
+guide-button-search = Search
+guide-button-next = Next
+guide-button-prev = Prev
+
+# Hotkeys
+hotkeys-global = Global Hotkeys:
+hotkeys-screenshot = Screenshot
+hotkeys-volume-down = Volume -
+hotkeys-volume-up = Volume +
+hotkeys-brightness-down = Brightness -
+hotkeys-brightness-up = Brightness +
+
+hotkeys-ingame = Ingame Hotkeys:
+hotkeys-toggle-aspect-ratio = Toggle Aspect Ratio
+hotkeys-toggle-fps = Toggle FPS
+
+# Common
+button-back = Back
+button-confirm = Confirm
+button-edit = Edit
+button-select = Select
+button-launch = Launch
+button-sort = Sort
+button-edit-search = Edit Search
+button-restore-defaults = Restore Defaults
+
+keyboard-button-backspace = Backspace
+keyboard-button-shift = Shift
+
+powering-off = Powering off...
+charging = Charging...

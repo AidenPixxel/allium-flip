@@ -1,0 +1,12 @@
+[submodule "third-party/dufs"]
+	path = third-party/dufs
+	url = https://github.com/sigoden/dufs.git
+[submodule "third-party/RetroArch-patch"]
+	path = third-party/RetroArch-patch
+	url = https://github.com/goweiwen/RetroArch-patch.git
+[submodule "third-party/collie"]
+	path = third-party/collie
+	url = https://github.com/goweiwen/collie.git
+[submodule "third-party/dropbear/submodules/dropbear"]
+	path = third-party/dropbear/submodules/dropbear
+	url = https://github.com/mkj/dropbear.git

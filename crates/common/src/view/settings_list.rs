@@ -1,0 +1,466 @@
+use std::collections::VecDeque;
+use std::iter::zip;
+
+use anyhow::Result;
+use async_trait::async_trait;
+use tokio::sync::mpsc::Sender;
+
+use crate::display::Display;
+use crate::geom::{Alignment, Point, Rect};
+use crate::platform::{DefaultPlatform, Key, KeyEvent, Platform};
+use crate::resources::Resources;
+use crate::stylesheet::Stylesheet;
+use crate::view::{Command, Label, View};
+
+/// A listing of selectable entries. Assumes that all entries have the same size.
+#[derive(Debug)]
+pub struct SettingsList {
+    res: Resources,
+    rect: Rect,
+    labels: Vec<String>,
+    left: Vec<Label<String>>,
+    right: Vec<Box<dyn View>>,
+    entry_height: u32,
+    top: usize,
+    selected: usize,
+    focused: bool,
+    dirty: bool,
+    has_layout: bool,
+}
+
+impl SettingsList {
+    pub fn new(
+        res: Resources,
+        rect: Rect,
+        left: Vec<String>,
+        right: Vec<Box<dyn View>>,
+        entry_height: u32,
+    ) -> Self {
+        let mut this = Self {
+            res,
+            rect,
+            labels: Vec::new(),
+            left: Vec::new(),
+            right: Vec::new(),
+            entry_height,
+            top: 0,
+            selected: 0,
+            focused: false,
+            dirty: true,
+            has_layout: false,
+        };
+
+        this.set_items(left, right);
+
+        this
+    }
+
+    pub fn set_items(&mut self, left: Vec<String>, right: Vec<Box<dyn View>>) {
+        self.labels = left;
+        self.right = right;
+        self.left.clear();
+
+        {
+            let styles = self.res.get::<Stylesheet>();
+            let mut y = self.rect.y + styles.ui.padding_y;
+            for i in 0..self.visible_count() {
+                self.left.push(Label::new(
+                    Point::new(self.rect.x + styles.ui.padding_x, y),
+                    self.labels[i].to_owned(),
+                    Alignment::Left,
+                    Some((self.rect.w - styles.ui.padding_x as u32 * 2) * 2 / 3),
+                ));
+                y += self.entry_height as i32 + styles.ui.list_margin;
+            }
+
+            self.top = 0;
+            if self.selected >= self.top + self.visible_count() {
+                self.top = self.selected;
+            } else if self.selected < self.top {
+                self.top = self.selected.min(self.labels.len() - self.visible_count());
+            }
+        }
+
+        if !self.left.is_empty() {
+            self.left_mut(0).focus();
+        }
+
+        self.has_layout = false;
+        self.dirty = true;
+    }
+
+    pub fn set_right(&mut self, i: usize, right: Box<dyn View>) {
+        self.right[i] = right;
+        self.has_layout = false;
+        self.dirty = true;
+    }
+
+    pub fn select(&mut self, index: usize) {
+        if let Some(child) = self.left.get_mut(self.selected - self.top) {
+            child.blur();
+        }
+
+        let index = index.min(self.labels.len().saturating_sub(1));
+
+        if index >= self.top + self.visible_count() {
+            self.top = index - self.visible_count() + 1;
+            self.update_children();
+            self.has_layout = false;
+        } else if index < self.top {
+            self.top = index;
+            self.update_children();
+            self.has_layout = false;
+        }
+
+        self.selected = index;
+
+        if let Some(child) = self.left.get_mut(self.selected - self.top) {
+            child.focus();
+        }
+
+        self.dirty = true;
+    }
+
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
+    pub fn left(&self, i: usize) -> &str {
+        &self.labels[i]
+    }
+
+    pub fn left_mut(&mut self, i: usize) -> &mut Label<String> {
+        &mut self.left[i]
+    }
+
+    pub fn right(&self, i: usize) -> &dyn View {
+        &self.right[i]
+    }
+
+    pub fn right_mut(&mut self, i: usize) -> &mut dyn View {
+        &mut self.right[i]
+    }
+
+    pub fn visible_count(&self) -> usize {
+        let styles = self.res.get::<Stylesheet>();
+        (self.rect.h as usize / (self.entry_height as usize + styles.ui.list_margin as usize))
+            .min(self.labels.len())
+            .min(self.right.len())
+    }
+
+    fn update_children(&mut self) {
+        for (i, child) in self.left.iter_mut().enumerate() {
+            child.set_text(self.labels[self.top + i].to_owned());
+        }
+    }
+}
+
+#[async_trait(?Send)]
+impl View for SettingsList {
+    fn draw(
+        &mut self,
+        display: &mut <DefaultPlatform as Platform>::Display,
+        styles: &Stylesheet,
+    ) -> Result<bool> {
+        if self.dirty {
+            if !self.has_layout {
+                for i in 0..self.visible_count() {
+                    let child = &mut self.right[self.top + i];
+                    child.set_position(Point::new(
+                        self.rect.x + self.rect.w as i32 - styles.ui.padding_x,
+                        self.rect.y
+                            + styles.ui.padding_y
+                            + i as i32 * (self.entry_height as i32 + styles.ui.list_margin),
+                    ));
+                    self.has_layout = true;
+                }
+            }
+
+            display.load(self.bounding_box(styles))?;
+
+            let left = self
+                .left
+                .get_mut(self.selected - self.top)
+                .map(|s| s.bounding_box(styles))
+                .unwrap_or_default();
+            let right = self
+                .right
+                .get_mut(self.selected)
+                .map(|s| s.bounding_box(styles))
+                .unwrap_or_default();
+
+            let mut pixmap = display.pixmap_mut();
+
+            // Highlight Background (semi-transparent)
+            if right.w != 0 && right.h != 0 {
+                let union_rect = left.union(&right);
+                let bg_rect = Rect::new(
+                    self.rect.x,
+                    union_rect.y - styles.ui.padding_y,
+                    self.rect.w,
+                    union_rect.h + styles.ui.padding_y as u32 * 2,
+                );
+                crate::display::fill_rounded_rect(
+                    &mut pixmap,
+                    bg_rect,
+                    union_rect.h + styles.ui.padding_y as u32 * 2,
+                    styles.ui.highlight_color.with_a(0x40),
+                );
+            }
+
+            // Highlight foreground
+            let rect = if self.focused { right } else { left };
+            let highlight_rect = Rect::new(
+                rect.x - styles.ui.padding_x,
+                rect.y - styles.ui.padding_y,
+                rect.w + styles.ui.padding_x as u32 * 2,
+                rect.h + styles.ui.padding_y as u32 * 2,
+            );
+            crate::display::fill_rounded_rect(
+                &mut pixmap,
+                highlight_rect,
+                rect.h + styles.ui.padding_y as u32 * 2,
+                styles.ui.highlight_color,
+            );
+
+            for (i, left) in self.left.iter_mut().enumerate() {
+                left.set_should_draw();
+                let right = &mut self.right[self.top + i];
+                right.set_should_draw();
+            }
+
+            self.dirty = false;
+        }
+
+        let mut drawn = false;
+        for (i, left) in self.left.iter_mut().enumerate() {
+            let mut drawn_left = false;
+            if left.should_draw() && left.draw(display, styles)? {
+                drawn = true;
+                drawn_left = true;
+            }
+            let right = &mut self.right[self.top + i];
+            if (drawn_left || right.should_draw()) && right.draw(display, styles)? {
+                drawn = true;
+            }
+        }
+
+        if self.focused {
+            let right = &mut self.right[self.selected];
+            right.set_should_draw();
+
+            let left = self.left.get_mut(self.selected - self.top).unwrap();
+            let left_rect = left.bounding_box(styles);
+            let right_rect = right.bounding_box(styles);
+
+            // Highlight Background (semi-transparent)
+            if right_rect.w != 0 && right_rect.h != 0 {
+                let union_rect = left_rect.union(&right_rect);
+                display.load(Rect::new(
+                    union_rect.x - styles.ui.padding_x,
+                    union_rect.y - styles.ui.padding_y,
+                    union_rect.w + styles.ui.padding_x as u32 * 2,
+                    union_rect.h + styles.ui.padding_y as u32 * 2,
+                ))?;
+
+                let bg_rect = Rect::new(
+                    self.rect.x,
+                    union_rect.y - styles.ui.padding_y,
+                    self.rect.w,
+                    union_rect.h + styles.ui.padding_y as u32 * 2,
+                );
+                crate::display::fill_rounded_rect(
+                    &mut display.pixmap_mut(),
+                    bg_rect,
+                    union_rect.h,
+                    styles.ui.highlight_color.with_a(0x40),
+                );
+            }
+
+            // Highlight foreground
+            let highlight_rect = Rect::new(
+                right_rect.x - styles.ui.padding_x,
+                right_rect.y - styles.ui.padding_y,
+                right_rect.w + styles.ui.padding_x as u32 * 2,
+                right_rect.h + styles.ui.padding_y as u32 * 2,
+            );
+            crate::display::fill_rounded_rect(
+                &mut display.pixmap_mut(),
+                highlight_rect,
+                right_rect.h,
+                styles.ui.highlight_color,
+            );
+
+            left.draw(display, styles)?;
+            right.draw(display, styles)?;
+            drawn = true;
+        }
+
+        Ok(drawn)
+    }
+
+    fn should_draw(&self) -> bool {
+        self.dirty
+            || self.left.iter().any(|c| c.should_draw())
+            || self
+                .right
+                .iter()
+                .skip(self.top)
+                .take(self.visible_count())
+                .any(|c| c.should_draw())
+    }
+
+    fn set_should_draw(&mut self) {
+        self.dirty = true;
+        self.left.iter_mut().for_each(|c| c.set_should_draw());
+        let visible_count = self.visible_count();
+        self.right
+            .iter_mut()
+            .skip(self.top)
+            .take(visible_count)
+            .for_each(|c| c.set_should_draw());
+    }
+    async fn handle_key_event(
+        &mut self,
+        event: KeyEvent,
+        command: Sender<Command>,
+        bubble: &mut VecDeque<Command>,
+    ) -> Result<bool> {
+        if self.focused {
+            if let Some(selected) = self.right.get_mut(self.selected)
+                && selected.handle_key_event(event, command, bubble).await?
+            {
+                bubble.retain_mut(|cmd| match cmd {
+                    Command::TrapFocus => false,
+                    Command::Unfocus => {
+                        self.focused = false;
+                        if let Some(child) = self.left.get_mut(self.selected - self.top) {
+                            child.focus();
+                        }
+                        if let Some(child) = self.right.get_mut(self.selected) {
+                            child.blur();
+                        }
+                        self.dirty = true;
+                        false
+                    }
+                    Command::ValueChanged(i, _) => {
+                        *i = self.selected;
+                        true
+                    }
+                    _ => true,
+                });
+                return Ok(true);
+            }
+            Ok(false)
+        } else if !self.left.is_empty() {
+            match event {
+                KeyEvent::Pressed(Key::Up) | KeyEvent::Autorepeat(Key::Up) => {
+                    self.select(
+                        (self.selected as isize - 1).rem_euclid(self.right.len() as isize) as usize,
+                    );
+                    self.dirty = true;
+                    Ok(true)
+                }
+                KeyEvent::Pressed(Key::Down) | KeyEvent::Autorepeat(Key::Down) => {
+                    self.select((self.selected + 1).rem_euclid(self.right.len()));
+                    self.dirty = true;
+                    Ok(true)
+                }
+                KeyEvent::Pressed(Key::L) | KeyEvent::Autorepeat(Key::L) => {
+                    self.select(
+                        (self.selected as isize - 5).clamp(0, self.right.len() as isize - 1)
+                            as usize,
+                    );
+                    self.dirty = true;
+                    Ok(true)
+                }
+                KeyEvent::Pressed(Key::R) | KeyEvent::Autorepeat(Key::R) => {
+                    self.select((self.selected + 5).clamp(0, self.right.len() - 1));
+                    self.dirty = true;
+                    Ok(true)
+                }
+                KeyEvent::Pressed(Key::A) => {
+                    if let Some(selected) = self.right.get_mut(self.selected)
+                        && selected.handle_key_event(event, command, bubble).await?
+                    {
+                        bubble.retain_mut(|cmd| match cmd {
+                            Command::TrapFocus => {
+                                self.focused = true;
+                                selected.focus();
+                                if let Some(child) = self.left.get_mut(self.selected - self.top) {
+                                    child.blur();
+                                }
+                                self.dirty = true;
+                                false
+                            }
+                            Command::ValueChanged(i, _) => {
+                                *i = self.selected;
+                                true
+                            }
+                            _ => true,
+                        });
+                        return Ok(true);
+                    }
+                    Ok(false)
+                }
+                _ => Ok(false),
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn children(&self) -> Vec<&dyn View> {
+        let visible_count = self.visible_count();
+        self.left
+            .iter()
+            .skip(self.top)
+            .take(visible_count)
+            .map(|c| c as &dyn View)
+            .chain(
+                self.right
+                    .iter()
+                    .skip(self.top)
+                    .take(visible_count)
+                    .map(|c| c.as_ref() as &dyn View),
+            )
+            .collect()
+    }
+
+    fn children_mut(&mut self) -> Vec<&mut dyn View> {
+        let visible_count = self.visible_count();
+        self.left
+            .iter_mut()
+            .skip(self.top)
+            .take(visible_count)
+            .map(|c| c as &mut dyn View)
+            .chain(
+                self.right
+                    .iter_mut()
+                    .skip(self.top)
+                    .take(visible_count)
+                    .map(|c| c.as_mut() as &mut dyn View),
+            )
+            .collect()
+    }
+
+    fn bounding_box(&mut self, _styles: &Stylesheet) -> Rect {
+        self.rect
+    }
+
+    fn set_position(&mut self, point: Point) {
+        let styles = self.res.get::<Stylesheet>();
+
+        self.rect.x = point.x;
+        self.rect.y = point.y;
+
+        let mut y = self.rect.y + styles.ui.padding_y;
+        for (left, right) in zip(self.left.iter_mut(), self.right.iter_mut()) {
+            left.set_position(Point::new(point.x + styles.ui.padding_x, y));
+            right.set_position(Point::new(point.x + styles.ui.padding_x, y));
+            y += self.entry_height as i32 + styles.ui.list_margin;
+        }
+
+        self.dirty = true;
+    }
+}
