@@ -1,4 +1,5 @@
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
@@ -7,7 +8,7 @@ use log::{debug, trace, warn};
 use tiny_skia::{Pixmap, PixmapMut, PixmapRef};
 
 use crate::display::color::Color;
-use crate::display::{Display, RectHold};
+use crate::display::{Display, HeldPixels, RectHold};
 use crate::geom::Rect;
 
 /// Pause between stamping passes, matching Onion; probing or yielding instead costs whole
@@ -141,7 +142,7 @@ impl FramebufferDisplay {
             pages,
         );
         Some(Stamp {
-            bytes: bytes.into_boxed_slice(),
+            bytes: Arc::new(Mutex::new(bytes.into_boxed_slice())),
             rows: rows.into_boxed_slice(),
             pages,
             page_stride: width * height * bytes_per_pixel,
@@ -199,8 +200,9 @@ struct StampRow {
 
 /// Rows of a rect in fb byte order, to be repeated across every page the app may flip to
 struct Stamp {
-    /// Every row back to back, so a pass reads the source linearly
-    bytes: Box<[u8]>,
+    /// Every row back to back, so a pass reads the source linearly. Shared with the holder so the
+    /// content can be swapped without restarting the stamping thread.
+    bytes: HeldPixels,
     rows: Box<[StampRow]>,
     pages: usize,
     page_stride: usize,
@@ -208,12 +210,15 @@ struct Stamp {
 
 impl Stamp {
     fn blit(&self, frame: &mut [u8]) {
+        let Ok(bytes) = self.bytes.lock() else {
+            return;
+        };
         for page in 0..self.pages {
             let base = page * self.page_stride;
             for row in &self.rows {
                 let at = base + row.offset;
                 if let Some(dst) = frame.get_mut(at..at + row.len) {
-                    dst.copy_from_slice(&self.bytes[row.start..row.start + row.len]);
+                    dst.copy_from_slice(&bytes[row.start..row.start + row.len]);
                 }
             }
         }
@@ -302,7 +307,10 @@ impl Display for FramebufferDisplay {
             return Ok(None);
         };
 
-        Ok(Some(RectHold::spawn(move |stop| {
+        // The hold keeps a handle on the same buffer the thread reads, so later content changes
+        // go through `refresh_rect_hold` instead of stopping this thread and starting another
+        let pixels = Arc::clone(&stamp.bytes);
+        Ok(Some(RectHold::spawn(pixels, move |stop| {
             let Ok(mut iface) = Framebuffer::new("/dev/fb0") else {
                 return;
             };
@@ -311,6 +319,22 @@ impl Display for FramebufferDisplay {
                 std::thread::sleep(STAMP_PAUSE);
             }
         })))
+    }
+
+    fn refresh_rect_hold(
+        &mut self,
+        hold: &RectHold,
+        area: Rect,
+        corner_radius: u32,
+    ) -> Result<bool> {
+        self.flush_rect(area)?;
+        let Some(stamp) = self.stamp(area, corner_radius) else {
+            return Ok(false);
+        };
+        let Ok(bytes) = stamp.bytes.lock() else {
+            return Ok(false);
+        };
+        Ok(hold.update_pixels(&bytes))
     }
 
     fn save(&mut self) -> Result<()> {

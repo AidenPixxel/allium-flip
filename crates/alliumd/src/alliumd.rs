@@ -344,7 +344,10 @@ impl AlliumD<DefaultPlatform> {
                             error!("failed to update OSD: {}", e);
                         }
                     }
-                    _ = self.menu.done_rx.recv() => {
+                    // `Some` matters: once the menu thread is gone the channel closes and recv
+                    // returns None forever, so a `_` pattern would spin the loop at full speed,
+                    // flooding RetroArch with Unpause and starving the event loop
+                    Some(()) = self.menu.done_rx.recv() => {
                         info!("menu finished, resuming game");
                         self.menu_open = false;
                         self.is_menu_pressed_alone = false;
@@ -510,18 +513,22 @@ impl AlliumD<DefaultPlatform> {
                             }
                         });
 
-                        if info.is_some() {
-                            RetroArchCommand::Pause.send().await?;
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        }
+                        // Pause regardless of whether GetInfo answered. A timeout only means
+                        // RetroArch was too busy to reply within 250ms, not that it is absent --
+                        // and leaving it running would let it repaint straight over the menu,
+                        // which looks exactly like the menu button having done nothing.
+                        RetroArchCommand::Pause.send().await?;
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
                         // The plate would keep re-flushing over the menu until its timeout
                         self.hide_osd();
 
-                        self.menu_open = true;
                         if self.menu.tx.send(info).is_err() {
+                            // Latching menu_open here would block every future menu press
                             error!("failed to send to menu thread");
-                            self.menu_open = false;
+                            RetroArchCommand::Unpause.send().await?;
+                        } else {
+                            self.menu_open = true;
                         }
                     }
                     self.is_menu_pressed_alone = false;

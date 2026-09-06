@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use common::constants::UI_FRAME_INTERVAL;
 use common::display::{
     Display, RectHold, draw_moon_icon, draw_speaker_icon, draw_sun_icon, fill_rounded_rect,
 };
@@ -12,8 +11,11 @@ use tokio::time::Instant;
 
 /// How long the indicator stays on screen after the last change
 const HIDE_TIMEOUT: Duration = Duration::from_millis(1000);
-/// Twice per UI frame, since a launcher redraw flushes the whole screen
-const UI_REDRAW_PERIOD: Duration = Duration::from_micros(UI_FRAME_INTERVAL.as_micros() as u64 / 2);
+/// How often the plate is re-flushed when nothing else repaints it. A launcher redraw flushes the
+/// whole screen and wipes the plate, so this is how long it can stay missing; keep it near one
+/// display frame. Deriving it from UI_FRAME_INTERVAL would give 83ms -- half a *launcher* frame at
+/// 6fps -- which leaves the plate dark for five display frames at a time.
+const UI_REDRAW_PERIOD: Duration = Duration::from_millis(16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OsdKind {
@@ -105,6 +107,12 @@ impl<P: Platform> Surface<P> {
 
     fn flush_plate(&mut self) -> Result<()> {
         self.display.flush_rect(self.plate.rect)
+    }
+
+    /// Repaints a live stamper's pixels in place; false means the hold has to be rebuilt
+    fn refresh_plate(&mut self, hold: &RectHold) -> Result<bool> {
+        self.display
+            .refresh_rect_hold(hold, self.plate.rect, self.plate.radius)
     }
 
     /// Puts the pre-OSD background back where the plate was
@@ -202,6 +210,32 @@ impl<P: Platform> Osd<P> {
         fraction: f32,
         repainting: bool,
     ) -> Result<()> {
+        let now = Instant::now();
+
+        // Reuse the plate that is already up whenever the strategy still fits. Rebuilding stops
+        // the stamper, spawns a thread and re-mmaps fb0 -- and leaves the rect undefended in
+        // between, which is what makes the bar flicker while a key autorepeats ~30 times a second.
+        if let Some(shown) = self.shown.as_mut() {
+            let reusable = matches!(
+                (&shown.refresh, repainting),
+                (Refresh::Continuous(_), true) | (Refresh::Periodic { .. }, false)
+            );
+            if reusable {
+                shown.surface.draw(&self.styles, kind, fraction)?;
+                let refreshed = match &shown.refresh {
+                    Refresh::Continuous(hold) => shown.surface.refresh_plate(hold)?,
+                    Refresh::Periodic { .. } => true,
+                };
+                if refreshed {
+                    shown.hide_at = now + HIDE_TIMEOUT;
+                    if let Refresh::Periodic { next_redraw } = &mut shown.refresh {
+                        *next_redraw = now + UI_REDRAW_PERIOD;
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
         // Consuming the old state stops its stamper before the new content is drawn
         let mut surface = match self.shown.take() {
             Some(shown) => shown.surface,
@@ -210,7 +244,6 @@ impl<P: Platform> Osd<P> {
 
         surface.draw(&self.styles, kind, fraction)?;
 
-        let now = Instant::now();
         let periodic = Refresh::Periodic {
             next_redraw: now + UI_REDRAW_PERIOD,
         };

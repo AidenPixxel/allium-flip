@@ -67,9 +67,11 @@ impl EvdevKeys {
             if event.event_type() == EventType::KEY {
                 let key: Key = event.code().into();
                 let value = event.value();
-                // Skip stale presses after a stall, but a stale release must still
-                // pass through or the key stays latched in the caller's key state
-                if value != 0
+                // Skip stale autorepeats after a stall, so a held key doesn't fire a burst
+                // once we catch up. Presses and releases must both pass through: dropping a
+                // press while its release survives leaves callers that pair the two -- like
+                // alliumd's `is_menu_pressed_alone` -- silently unable to act on the key.
+                if value == 2
                     && event.timestamp().elapsed().unwrap_or_default() > MAXIMUM_FRAME_TIME
                 {
                     continue;

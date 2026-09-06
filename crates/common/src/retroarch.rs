@@ -84,8 +84,13 @@ impl RetroArchCommand {
                 Ok(Some(reply))
             }
             Ok(Err(e)) => {
+                // "No reply" is not an error the caller can do anything about, and it must not
+                // propagate: a connected UDP socket whose peer isn't listening yet -- RetroArch
+                // still loading a ROM -- surfaces the queued ICMP port-unreachable as
+                // ECONNREFUSED here, and `?` at the call site would take alliumd down with it.
+                // The init script restarts alliumd by rebooting the device.
                 error!("Error receiving from RetroArch: {}", e);
-                Err(e.into())
+                Ok(None)
             }
             Err(e) => {
                 error!("Timeout receiving from RetroArch: {}", e);

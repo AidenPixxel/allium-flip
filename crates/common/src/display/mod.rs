@@ -3,8 +3,8 @@ pub mod font;
 pub mod image;
 pub mod settings;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use tiny_skia::{
@@ -14,20 +14,40 @@ use tiny_skia::{
 use crate::display::color::Color;
 use crate::geom::{Point, Rect, Size};
 
+/// The pixels a [`RectHold`]'s thread repeats, shared so the content can change without
+/// restarting the thread
+pub type HeldPixels = Arc<Mutex<Box<[u8]>>>;
+
 /// A thread stamping a region over a repainting foreground app; it runs until this is dropped
 pub struct RectHold {
     stop: Arc<AtomicBool>,
+    pixels: HeldPixels,
 }
 
 impl RectHold {
-    /// Runs `stamp` on a thread until the returned hold is dropped; it polls the flag it is handed
-    pub fn spawn(stamp: impl FnOnce(&AtomicBool) + Send + 'static) -> Self {
+    /// Runs `stamp` on a thread until the returned hold is dropped; it polls the flag it is handed.
+    /// `pixels` is the same buffer the thread reads, so [`RectHold::update_pixels`] can change what
+    /// is stamped in place.
+    pub fn spawn(pixels: HeldPixels, stamp: impl FnOnce(&AtomicBool) + Send + 'static) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         std::thread::spawn({
             let stop = Arc::clone(&stop);
             move || stamp(&stop)
         });
-        Self { stop }
+        Self { stop, pixels }
+    }
+
+    /// Swaps in new pixels for the running thread. Returns false when the buffer no longer matches
+    /// -- the geometry changed, or the lock is poisoned -- and the caller must rebuild the hold.
+    pub fn update_pixels(&self, bytes: &[u8]) -> bool {
+        let Ok(mut pixels) = self.pixels.lock() else {
+            return false;
+        };
+        if pixels.len() != bytes.len() {
+            return false;
+        }
+        pixels.copy_from_slice(bytes);
+        true
     }
 }
 
@@ -91,6 +111,17 @@ pub trait Display: Sized {
     /// screen, until the returned hold is dropped. `None` when the platform cannot stamp
     fn hold_rect(&mut self, _area: Rect, _corner_radius: u32) -> Result<Option<RectHold>> {
         Ok(None)
+    }
+
+    /// Repaints a held rect's pixels from the current pixmap without restarting its thread.
+    /// Returns false if the hold has to be rebuilt instead.
+    fn refresh_rect_hold(
+        &mut self,
+        _hold: &RectHold,
+        _area: Rect,
+        _corner_radius: u32,
+    ) -> Result<bool> {
+        Ok(false)
     }
 
     /// Sync with the display hardware
