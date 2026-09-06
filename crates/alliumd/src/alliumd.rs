@@ -234,7 +234,9 @@ impl AlliumD<DefaultPlatform> {
         platform.set_brightness(state.brightness)?;
 
         info!("loading display settings");
-        platform.set_display_settings(&mut DisplaySettings::load()?)?;
+        // `effective` folds in night mode, so it survives a reboot without being baked into the
+        // stored base values.
+        platform.set_display_settings(&mut DisplaySettings::load()?.effective())?;
 
         let main = spawn_main().await?;
         let locale = Locale::new(&LocaleSettings::load()?.lang);
@@ -433,6 +435,9 @@ impl AlliumD<DefaultPlatform> {
                 }
                 KeyEvent::Pressed(Key::Right) | KeyEvent::Autorepeat(Key::Right) => {
                     self.add_volume(1)?;
+                }
+                KeyEvent::Pressed(Key::Select) => {
+                    self.toggle_night_mode()?;
                 }
                 KeyEvent::Released(Key::Power) => {
                     let game_info = GameInfo::load()?;
@@ -751,6 +756,25 @@ impl AlliumD<DefaultPlatform> {
             self.state.brightness as f32 / MAX_BRIGHTNESS as f32,
         );
         self.platform.set_brightness(self.state.brightness)?;
+        Ok(())
+    }
+
+    /// Toggle the warm, dimmed night mode. Driven through the display controller's colour
+    /// registers rather than the framebuffer, so it applies to RetroArch's frames too.
+    fn toggle_night_mode(&mut self) -> Result<()> {
+        let mut settings = DisplaySettings::load()?;
+        settings.night_mode = !settings.night_mode;
+        info!("night mode: {}", settings.night_mode);
+
+        // Draw first, matching add_volume/add_brightness
+        self.show_osd(
+            OsdKind::NightMode,
+            if settings.night_mode { 1.0 } else { 0.0 },
+        );
+
+        self.platform
+            .set_display_settings(&mut settings.effective())?;
+        settings.save()?;
         Ok(())
     }
 

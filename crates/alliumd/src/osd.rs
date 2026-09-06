@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use common::constants::UI_FRAME_INTERVAL;
-use common::display::{Display, RectHold, draw_speaker_icon, draw_sun_icon, fill_rounded_rect};
+use common::display::{
+    Display, RectHold, draw_moon_icon, draw_speaker_icon, draw_sun_icon, fill_rounded_rect,
+};
 use common::geom::Rect;
 use common::platform::Platform;
 use common::stylesheet::Stylesheet;
@@ -17,6 +19,7 @@ const UI_REDRAW_PERIOD: Duration = Duration::from_micros(UI_FRAME_INTERVAL.as_mi
 pub enum OsdKind {
     Volume,
     Brightness,
+    NightMode,
 }
 
 /// The plate and its contents, placed from the framebuffer size and the theme
@@ -135,6 +138,9 @@ impl<P: Platform> Surface<P> {
             }
             OsdKind::Brightness => {
                 draw_sun_icon(&mut self.display.pixmap_mut(), icon, styles.ui.text_color)
+            }
+            OsdKind::NightMode => {
+                draw_moon_icon(&mut self.display.pixmap_mut(), icon, styles.ui.text_color)
             }
         }
 

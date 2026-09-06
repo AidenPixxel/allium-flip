@@ -63,6 +63,7 @@ Allium supports both the Miyoo Mini, Miyoo Mini Plus,and Miyoo Mini Flip on the 
 - Activity tracker
 - [RetroArch for all supported cores](https://github.com/goweiwen/Allium/wiki/Console-Mapper)
 - Volume & Brightness (menu + l/r/u/d) control
+- Night mode: warm, dimmed screen for playing in the dark (menu + select), applied in the display controller so it covers games too
 - Configurable behaviour when plugged in while powered off (charging screen, charge silently, or stay off)
 - In-game menu (save & load with screenshots, reset, access RetroArch menu, [guide](https://github.com/goweiwen/Allium/wiki/In-game-Guide-Walkthrough-Reader), disk changer, quit)
 - Automatic resume when powering off/on

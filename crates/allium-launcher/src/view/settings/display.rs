@@ -206,6 +206,12 @@ impl View for Display {
                         _ => unreachable!("Invalid index"),
                     }
 
+                    // Night mode is toggled by the daemon's hotkey, so re-read the flag rather
+                    // than writing back whatever it was when this screen opened.
+                    if let Ok(current) = DisplaySettings::load() {
+                        self.settings.night_mode = current.night_mode;
+                    }
+
                     commands
                         .send(Command::SaveDisplaySettings(Box::new(
                             self.settings.clone(),

@@ -89,6 +89,16 @@ pub const MAX_VOLUME: i32 = 20;
 /// Brightness scale is 0..=MAX_BRIGHTNESS percent.
 pub const MAX_BRIGHTNESS: u8 = 100;
 
+/// Night mode dims the panel and cuts its green and blue channels, leaving red untouched, so the
+/// screen goes warm and dark for playing without light. These scale the user's base display
+/// settings; tune them here.
+pub const NIGHT_MODE_LUMINANCE_SCALE: f32 = 0.55;
+pub const NIGHT_MODE_GREEN_SCALE: f32 = 0.72;
+pub const NIGHT_MODE_BLUE_SCALE: f32 = 0.35;
+/// Floor for the scaled green/blue channels. The platform flattens all three channels back to
+/// neutral grey when every one of them falls below 15, which would cancel the tint entirely.
+pub const NIGHT_MODE_CHANNEL_FLOOR: u8 = 8;
+
 /// How long the daemon waits for a keypress before powering back off after a charger-triggered
 /// boot, so pressing Power while the cable is attached still turns the device on.
 pub const CHARGE_POWER_OFF_GRACE: Duration = Duration::from_millis(1500);

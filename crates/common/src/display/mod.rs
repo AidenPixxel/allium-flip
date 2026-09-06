@@ -272,6 +272,45 @@ pub fn draw_sun_icon(pixmap: &mut PixmapMut<'_>, rect: Rect, color: Color) {
     }
 }
 
+/// Draw a crescent moon night mode icon inside `rect`
+pub fn draw_moon_icon(pixmap: &mut PixmapMut<'_>, rect: Rect, color: Color) {
+    let s = rect.w.min(rect.h) as f32;
+    let (cx, cy) = (rect.x as f32 + 0.5 * s, rect.y as f32 + 0.5 * s);
+    let paint = icon_paint(color);
+
+    fn push_circle(pb: &mut PathBuilder, cx: f32, cy: f32, radius: f32) {
+        // Enough segments that the circles read as round at icon sizes
+        const SEGMENTS: u32 = 32;
+
+        for i in 0..SEGMENTS {
+            let angle = std::f32::consts::TAU * i as f32 / SEGMENTS as f32;
+            let (sin, cos) = angle.sin_cos();
+            let (px, py) = (cx + radius * cos, cy + radius * sin);
+            if i == 0 {
+                pb.move_to(px, py);
+            } else {
+                pb.line_to(px, py);
+            }
+        }
+        pb.close();
+    }
+
+    // A full disc with a second, offset disc punched out of it. EvenOdd turns the overlap into
+    // the crescent's bite.
+    let mut pb = PathBuilder::new();
+    push_circle(&mut pb, cx, cy, 0.42 * s);
+    push_circle(&mut pb, cx + 0.28 * s, cy - 0.16 * s, 0.36 * s);
+    if let Some(path) = pb.finish() {
+        pixmap.fill_path(
+            &path,
+            &paint,
+            FillRule::EvenOdd,
+            Transform::identity(),
+            None,
+        );
+    }
+}
+
 fn icon_paint(color: Color) -> Paint<'static> {
     Paint {
         shader: tiny_skia::Shader::SolidColor(color.into()),

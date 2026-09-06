@@ -217,9 +217,12 @@ impl AlliumLauncher<DefaultPlatform> {
                     self.view.set_should_draw();
                 }
             }
-            Command::SaveDisplaySettings(mut settings) => {
+            Command::SaveDisplaySettings(settings) => {
                 debug!("saving display settings");
-                self.platform.set_display_settings(&mut settings)?;
+                // Apply through `effective` so editing a slider while night mode is on doesn't
+                // knock the tint out, and persist the untouched base values.
+                self.platform
+                    .set_display_settings(&mut settings.effective())?;
                 settings.save()?;
             }
             Command::SaveLocaleSettings(settings) => {
