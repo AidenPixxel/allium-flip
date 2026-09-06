@@ -175,6 +175,7 @@ settings-system-operating-system-version = OS Version
 settings-system-kernel-version = Kernel Version
 settings-system-memory-used = Memory Used
 settings-system-update-channel = Update Channel
+settings-system-update-channel-off = Off
 settings-system-update-channel-stable = Stable
 settings-system-update-channel-nightly = Nightly
 settings-system-update = System Update

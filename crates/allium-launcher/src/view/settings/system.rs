@@ -51,9 +51,10 @@ impl UpdateStatus {
 impl From<usize> for UpdateChannel {
     fn from(value: usize) -> Self {
         match value {
-            0 => UpdateChannel::Stable,
-            1 => UpdateChannel::Nightly,
-            _ => UpdateChannel::Stable,
+            0 => UpdateChannel::Off,
+            1 => UpdateChannel::Stable,
+            2 => UpdateChannel::Nightly,
+            _ => UpdateChannel::Off,
         }
     }
 }
@@ -136,6 +137,7 @@ impl SystemUpdate {
             Point::zero(),
             update_channel as usize,
             vec![
+                locale.t("settings-system-update-channel-off"),
                 locale.t("settings-system-update-channel-stable"),
                 locale.t("settings-system-update-channel-nightly"),
             ],
@@ -211,6 +213,13 @@ impl SystemUpdate {
 
     /// Starts a background task to check for the latest version
     fn start_version_check(&mut self) {
+        // Don't even show "Checking..." when updates are off -- the label falls back to "-"
+        if self.update_channel == UpdateChannel::Off {
+            self.latest_version = None;
+            self.update_latest_version_label();
+            return;
+        }
+
         // Show "Checking..." in latest version label
         let locale = self.res.get::<Locale>();
         self.list.set_right(

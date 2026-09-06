@@ -13,7 +13,7 @@ FEATURES ?=
 -include local.mk
 
 .PHONY: all
-all: dist build package-build $(DIST_DIR)/RetroArch/retroarch $(DIST_DIR)/.allium/bin/dufs $(DIST_DIR)/.allium/bin/collie $(DIST_DIR)/.allium/bin/dropbear $(DIST_DIR)/.allium/bin/syncthing $(DIST_DIR)/.allium/cores/drastic/drastic $(DIST_DIR)/Themes migrations strip-all
+all: dist build package-build $(DIST_DIR)/RetroArch/retroarch $(DIST_DIR)/.allium/bin/dufs $(DIST_DIR)/.allium/bin/collie $(DIST_DIR)/.allium/bin/dropbear $(DIST_DIR)/.allium/bin/syncthing $(DIST_DIR)/Themes migrations strip-all
 
 .PHONY: clean
 clean:
@@ -127,12 +127,6 @@ $(DIST_DIR)/.allium/bin/dropbear:
 	mkdir -p $(DIST_DIR)/.allium/bin
 	cp $(DROPBEAR)/bin/dropbear $(DIST_DIR)/.allium/bin/dropbear
 
-DRASTIC_URL := https://github.com/steward-fu/nds/releases/download/v1.8/drastic-v1.8_miyoo.zip
-$(DIST_DIR)/.allium/cores/drastic/drastic:
-	wget "$(DRASTIC_URL)" -O /tmp/drastic.zip
-	mkdir -p $(DIST_DIR)/.allium/cores/drastic
-	unzip -o /tmp/drastic.zip -d $(DIST_DIR)/.allium/cores/drastic
-	rm /tmp/drastic.zip
 
 THEMES_URL := https://github.com/goweiwen/Allium-Themes.git
 $(DIST_DIR)/Themes:
