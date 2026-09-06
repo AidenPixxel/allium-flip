@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use common::command::Command;
+use common::command::{Command, Value};
 
 use common::display::Display as DisplayTrait;
 use common::geom::{Alignment, Point, Rect};
@@ -12,7 +12,7 @@ use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
 use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
 use common::resources::Resources;
 use common::stylesheet::Stylesheet;
-use common::view::{ButtonHint, ButtonHints, Number, Select, SettingsList, Toggle, View};
+use common::view::{ButtonHint, ButtonHints, Label, Number, Select, SettingsList, Toggle, View};
 
 use tokio::sync::mpsc::Sender;
 
@@ -26,8 +26,62 @@ pub struct Power {
     /// device-dependent, so the Select index has to be mapped back through it.
     charging_boot_actions: Vec<ChargingBootAction>,
     list: SettingsList,
+    /// Explains the highlighted row. Several of these settings are not self-describing -- "Charge
+    /// Silently" and "Nothing" in particular -- and getting one wrong is only discovered later,
+    /// when the device does something unexpected while you are not looking at it.
+    description: Label<String>,
+    description_rect: Rect,
     button_hints: ButtonHints<String>,
 }
+
+/// Locale key describing the option currently chosen for `row`, or `None` for rows whose label
+/// already says everything.
+fn description_key(row: usize, settings: &PowerSettings) -> Option<&'static str> {
+    match row {
+        ROW_AUTO_SLEEP_CHARGING => Some(if settings.auto_sleep_when_charging {
+            "settings-power-desc-auto-sleep-when-charging-on"
+        } else {
+            "settings-power-desc-auto-sleep-when-charging-off"
+        }),
+        ROW_AUTO_SLEEP_MINUTES => Some(if settings.auto_sleep_duration_minutes == 0 {
+            "settings-power-desc-auto-sleep-duration-disabled"
+        } else {
+            "settings-power-desc-auto-sleep-duration"
+        }),
+        ROW_CHARGING_BOOT => Some(match settings.charging_boot_action {
+            ChargingBootAction::ChargeScreen => "settings-power-desc-charging-boot-charge-screen",
+            ChargingBootAction::ChargeSilently => {
+                "settings-power-desc-charging-boot-charge-silently"
+            }
+            ChargingBootAction::PowerOff => "settings-power-desc-charging-boot-power-off",
+        }),
+        ROW_VOLUME_ON_STARTUP => Some(match settings.volume_on_startup {
+            VolumeOnStartup::Restore => "settings-power-desc-volume-on-startup-restore",
+            VolumeOnStartup::Muted => "settings-power-desc-volume-on-startup-muted",
+        }),
+        ROW_POWER_BUTTON | ROW_LID_CLOSE => Some(match power_action(row, settings) {
+            PowerButtonAction::Suspend => "settings-power-desc-action-suspend",
+            PowerButtonAction::Shutdown => "settings-power-desc-action-shutdown",
+            PowerButtonAction::Nothing => "settings-power-desc-action-nothing",
+        }),
+        _ => None,
+    }
+}
+
+fn power_action(row: usize, settings: &PowerSettings) -> PowerButtonAction {
+    if row == ROW_LID_CLOSE {
+        settings.lid_close_action
+    } else {
+        settings.power_button_action
+    }
+}
+
+const ROW_AUTO_SLEEP_CHARGING: usize = 0;
+const ROW_AUTO_SLEEP_MINUTES: usize = 1;
+const ROW_CHARGING_BOOT: usize = 2;
+const ROW_VOLUME_ON_STARTUP: usize = 3;
+const ROW_POWER_BUTTON: usize = 4;
+const ROW_LID_CLOSE: usize = 5;
 
 /// Powering off is hidden where `shutdown` can only reboot, which would make plugging in a
 /// charger loop the device through boot forever.
@@ -85,7 +139,22 @@ impl Power {
         );
 
         let button_hints_rect = button_hints.bounding_box(&styles);
-        let list_height = (button_hints_rect.y - y) as u32;
+        let row_pitch =
+            styles.ui.ui_font.size + styles.ui.padding_y as u32 + styles.ui.list_margin as u32;
+        let rows = if DefaultPlatform::has_lid() { 6 } else { 5 };
+        // Take the description's strip out of the list, but never so much that SettingsList's
+        // visible_count drops a row and starts scrolling
+        let available = (button_hints_rect.y - y) as u32;
+        let description_height = styles.ui.ui_font.size + styles.ui.padding_y as u32;
+        let list_height = available
+            .saturating_sub(description_height + styles.ui.margin_y as u32)
+            .max((rows * row_pitch).min(available));
+        let description_rect = Rect::new(
+            x + styles.ui.margin_x,
+            y + list_height as i32,
+            w - styles.ui.margin_x as u32 * 2,
+            description_height,
+        );
 
         let mut buttons: Vec<(String, Box<dyn View>)> = vec![
             (
@@ -188,6 +257,16 @@ impl Power {
             list.select(state.selected);
         }
 
+        let description_text = description_key(list.selected(), &power_settings)
+            .map(|key| locale.t(key))
+            .unwrap_or_default();
+        let description = Label::new(
+            Point::new(description_rect.x, description_rect.y),
+            description_text,
+            Alignment::Left,
+            None,
+        );
+
         drop(locale);
         drop(styles);
 
@@ -197,8 +276,55 @@ impl Power {
             power_settings,
             charging_boot_actions,
             list,
+            description,
+            description_rect,
             button_hints,
         }
+    }
+}
+
+impl Power {
+    fn apply_value(&mut self, row: usize, val: Value) {
+        match row {
+            ROW_AUTO_SLEEP_CHARGING => {
+                self.power_settings.auto_sleep_when_charging = val.as_bool().unwrap_or(true)
+            }
+            ROW_AUTO_SLEEP_MINUTES => {
+                self.power_settings.auto_sleep_duration_minutes = val.as_int().unwrap_or(5)
+            }
+            ROW_CHARGING_BOOT => {
+                // The option list is device-dependent, so index through it rather than
+                // treating the Select index as the enum discriminant.
+                self.power_settings.charging_boot_action = self
+                    .charging_boot_actions
+                    .get(val.as_int().unwrap_or(0) as usize)
+                    .copied()
+                    .unwrap_or_default();
+            }
+            ROW_VOLUME_ON_STARTUP => {
+                self.power_settings.volume_on_startup =
+                    VolumeOnStartup::from_repr(val.as_int().unwrap_or(0) as usize)
+                        .unwrap_or_default()
+            }
+            ROW_POWER_BUTTON => {
+                self.power_settings.power_button_action =
+                    PowerButtonAction::from_repr(val.as_int().unwrap_or(0) as usize)
+                        .unwrap_or_default()
+            }
+            ROW_LID_CLOSE => {
+                self.power_settings.lid_close_action =
+                    PowerButtonAction::from_repr(val.as_int().unwrap_or(0) as usize)
+                        .unwrap_or_default()
+            }
+            _ => {}
+        }
+    }
+
+    fn refresh_description(&mut self) {
+        let text = description_key(self.list.selected(), &self.power_settings)
+            .map(|key| self.res.get::<Locale>().t(key))
+            .unwrap_or_default();
+        self.description.set_text(text);
     }
 }
 
@@ -212,6 +338,12 @@ impl View for Power {
         let mut drawn = false;
 
         drawn |= self.list.should_draw() && self.list.draw(display, styles)?;
+
+        if self.description.should_draw() {
+            // The description sits between the list's rect and the hints', so neither restores it
+            display.load(self.description_rect)?;
+            drawn |= self.description.draw(display, styles)?;
+        }
 
         if self.button_hints.should_draw() {
             let bbox = self.button_hints.bounding_box(styles);
@@ -228,11 +360,12 @@ impl View for Power {
     }
 
     fn should_draw(&self) -> bool {
-        self.list.should_draw() || self.button_hints.should_draw()
+        self.list.should_draw() || self.description.should_draw() || self.button_hints.should_draw()
     }
 
     fn set_should_draw(&mut self) {
         self.list.set_should_draw();
+        self.description.set_should_draw();
         self.button_hints.set_should_draw();
     }
 
@@ -248,49 +381,23 @@ impl View for Power {
             .await?
         {
             while let Some(command) = bubble.pop_front() {
-                if let Command::ValueChanged(i, val) = command {
-                    match i {
-                        0 => {
-                            self.power_settings.auto_sleep_when_charging = val.as_bool().unwrap();
-                            toast_needs_restart_for_effect(&self.res, &commands).await?;
-                        }
-                        1 => {
-                            self.power_settings.auto_sleep_duration_minutes = val.as_int().unwrap();
-                            toast_needs_restart_for_effect(&self.res, &commands).await?;
-                        }
-                        2 => {
-                            // The option list is device-dependent, so index through it rather
-                            // than treating the Select index as the enum discriminant.
-                            self.power_settings.charging_boot_action = self
-                                .charging_boot_actions
-                                .get(val.as_int().unwrap() as usize)
-                                .copied()
-                                .unwrap_or_default();
-                            toast_needs_restart_for_effect(&self.res, &commands).await?;
-                        }
-                        3 => {
-                            self.power_settings.volume_on_startup =
-                                VolumeOnStartup::from_repr(val.as_int().unwrap() as usize)
-                                    .unwrap_or_default();
-                            toast_needs_restart_for_effect(&self.res, &commands).await?;
-                        }
-                        4 => {
-                            self.power_settings.power_button_action =
-                                PowerButtonAction::from_repr(val.as_int().unwrap() as usize)
-                                    .unwrap_or_default();
-                            toast_needs_restart_for_effect(&self.res, &commands).await?;
-                        }
-                        5 => {
-                            self.power_settings.lid_close_action =
-                                PowerButtonAction::from_repr(val.as_int().unwrap() as usize)
-                                    .unwrap_or_default();
-                            toast_needs_restart_for_effect(&self.res, &commands).await?;
-                        }
-                        _ => unreachable!("Invalid index"),
+                match command {
+                    // Cycling the options: follow along so the description tracks the highlighted
+                    // option, but don't persist until it is committed
+                    Command::ValuePreview(i, val) => {
+                        self.apply_value(i, val);
                     }
-                    self.power_settings.save()?;
+                    Command::ValueChanged(i, val) => {
+                        self.apply_value(i, val);
+                        self.power_settings.save()?;
+                        toast_needs_restart_for_effect(&self.res, &commands).await?;
+                    }
+                    _ => {}
                 }
             }
+            // The list consumed the event, so either the highlighted row moved or the value on
+            // it changed. Both alter what should be described, and neither is signalled directly.
+            self.refresh_description();
             return Ok(true);
         }
 
@@ -304,11 +411,11 @@ impl View for Power {
     }
 
     fn children(&self) -> Vec<&dyn View> {
-        vec![&self.list, &self.button_hints]
+        vec![&self.list, &self.description, &self.button_hints]
     }
 
     fn children_mut(&mut self) -> Vec<&mut dyn View> {
-        vec![&mut self.list, &mut self.button_hints]
+        vec![&mut self.list, &mut self.description, &mut self.button_hints]
     }
 
     fn bounding_box(&mut self, _styles: &Stylesheet) -> Rect {

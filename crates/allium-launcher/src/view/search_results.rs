@@ -133,7 +133,6 @@ pub struct SearchResultsView {
     rect: Rect,
     res: Resources,
     query: String,
-    current_sort: SearchResultsSort,
     list: EntryList<SearchResultsSort>,
     header: Label<String>,
     result_count: Label<String>,
@@ -211,7 +210,7 @@ impl SearchResultsView {
                         res.clone(),
                         Point::zero(),
                         Key::Y,
-                        sort.button_hint(&locale),
+                        locale.t("button-edit-search"),
                         Alignment::Right,
                     ),
                 ],
@@ -224,7 +223,6 @@ impl SearchResultsView {
             rect,
             res: res.clone(),
             query,
-            current_sort: sort,
             list,
             header,
             result_count,
@@ -243,10 +241,7 @@ impl SearchResultsView {
             games.len()
         };
 
-        let sort = SearchResultsSort::Relevance(new_query);
-        self.current_sort = sort.clone();
-        self.list.sort(sort)?;
-        self.update_sort_button_hint();
+        self.list.sort(SearchResultsSort::Relevance(new_query))?;
 
         let result_text = {
             let locale = self.res.get::<Locale>();
@@ -259,15 +254,6 @@ impl SearchResultsView {
         Ok(())
     }
 
-    fn update_sort_button_hint(&mut self) {
-        let locale = self.res.get::<Locale>();
-        let sort_text = self.current_sort.button_hint(&locale);
-        self.button_hints
-            .right_mut()
-            .get_mut(2)
-            .unwrap()
-            .set_text(sort_text);
-    }
 }
 
 #[async_trait(?Send)]
@@ -358,20 +344,10 @@ impl View for SearchResultsView {
                 bubble.push_back(Command::CloseView);
                 Ok(true)
             }
-            KeyEvent::Pressed(Key::X) => {
+            KeyEvent::Pressed(Key::Y) => {
                 self.search_view.activate_with_value(self.query.clone());
                 commands.send(Command::Redraw).await?;
                 Ok(true)
-            }
-            KeyEvent::Pressed(Key::Y) => {
-                if self.list.handle_key_event(event, commands, bubble).await? {
-                    self.current_sort = self.current_sort.next();
-                    self.update_sort_button_hint();
-                    self.button_hints.set_should_draw();
-                    Ok(true)
-                } else {
-                    Ok(false)
-                }
             }
             _ => self.list.handle_key_event(event, commands, bubble).await,
         }

@@ -63,22 +63,29 @@ where
 
         let mut button_hints = {
             let locale = res.get::<Locale>();
-            let mut hints = vec![ButtonHint::new(
-                res.clone(),
-                Point::zero(),
-                Key::A,
-                locale.t("button-select"),
-                Alignment::Right,
-            )];
-            if S::HAS_BUTTON_HINTS {
-                hints.push(ButtonHint::new(
+            let hints = vec![
+                ButtonHint::new(
                     res.clone(),
                     Point::zero(),
-                    Key::Y,
-                    sort.button_hint(&locale),
+                    Key::A,
+                    locale.t("button-resume"),
                     Alignment::Right,
-                ));
-            }
+                ),
+                ButtonHint::new(
+                    res.clone(),
+                    Point::zero(),
+                    Key::X,
+                    locale.t("button-restart"),
+                    Alignment::Right,
+                ),
+                ButtonHint::new(
+                    res.clone(),
+                    Point::zero(),
+                    Key::Select,
+                    locale.t("button-options"),
+                    Alignment::Right,
+                ),
+            ];
             ButtonHints::new(res.clone(), vec![], hints)
         };
 
@@ -171,7 +178,8 @@ where
         debug!("Selected entry: {:?}", self.entries.get(index));
     }
 
-    async fn select_entry(&mut self, commands: Sender<Command>) -> Result<()> {
+    /// `restart` starts a game from the beginning instead of resuming its auto save state.
+    async fn select_entry(&mut self, commands: Sender<Command>, restart: bool) -> Result<()> {
         if let Some(entry) = self.entries.get_mut(self.list.selected()) {
             match entry {
                 Entry::Directory(dir) => {
@@ -183,11 +191,10 @@ where
                     self.child = Some(Box::new(child));
                 }
                 Entry::Game(game) => {
-                    let command = self.res.get::<ConsoleMapper>().launch_game(
-                        &self.res.get(),
-                        game,
-                        false,
-                    )?;
+                    let command =
+                        self.res
+                            .get::<ConsoleMapper>()
+                            .launch_game(&self.res.get(), game, restart)?;
                     if let Some(cmd) = command {
                         commands.send(cmd).await?;
                     }
@@ -246,6 +253,7 @@ where
                     MenuEntry::Favorite(game.favorite),
                     MenuEntry::Launch(None),
                     MenuEntry::Reset,
+                    MenuEntry::Sort(self.sort.next().button_hint(&locale)),
                     MenuEntry::RemoveFromRecents,
                     MenuEntry::RepopulateDatabase,
                 ];
@@ -283,6 +291,7 @@ where
                 vec![
                     MenuEntry::Launch(None),
                     MenuEntry::Reset,
+                    MenuEntry::Sort(self.sort.next().button_hint(&locale)),
                     MenuEntry::RemoveFromRecents,
                     MenuEntry::RepopulateDatabase,
                 ]
@@ -512,7 +521,7 @@ where
                                 game.core = Some(core.to_string());
                             }
                             self.core = None;
-                            self.select_entry(commands).await?;
+                            self.select_entry(commands, false).await?;
                         }
                         MenuEntry::Reset => {
                             let entry = self.entries.get_mut(self.list.selected()).unwrap();
@@ -529,6 +538,12 @@ where
                                     }
                                 }
                             }
+                            commands.send(Command::Redraw).await?;
+                        }
+                        MenuEntry::Sort(_) => {
+                            self.sort(self.sort.next())?;
+                            self.menu = None;
+                            self.core = None;
                             commands.send(Command::Redraw).await?;
                         }
                         MenuEntry::RemoveFromRecents => {
@@ -616,11 +631,11 @@ where
                     Ok(true)
                 }
                 KeyEvent::Pressed(Key::A) => {
-                    self.select_entry(commands).await?;
+                    self.select_entry(commands, false).await?;
                     Ok(true)
                 }
-                KeyEvent::Pressed(Key::Y) => {
-                    self.sort(self.sort.next())?;
+                KeyEvent::Pressed(Key::X) => {
+                    self.select_entry(commands, true).await?;
                     Ok(true)
                 }
                 KeyEvent::Pressed(Key::Select) => {
@@ -669,6 +684,8 @@ enum MenuEntry {
     Favorite(bool),
     Launch(Option<String>),
     Reset,
+    /// Carries the label of the sort it switches to, so the row reads as the action it performs
+    Sort(String),
     RemoveFromRecents,
     RepopulateDatabase,
 }
@@ -694,6 +711,7 @@ impl MenuEntry {
                 }
             }
             MenuEntry::Reset => locale.t("menu-reset"),
+            MenuEntry::Sort(next) => next.clone(),
             MenuEntry::RemoveFromRecents => locale.t("menu-remove-from-recents"),
             MenuEntry::RepopulateDatabase => locale.t("menu-repopulate-database"),
         }

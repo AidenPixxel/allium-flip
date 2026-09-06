@@ -11,9 +11,8 @@ use crate::display::color::Color;
 use crate::display::{Display, HeldPixels, RectHold};
 use crate::geom::Rect;
 
-/// Pause between stamping passes, matching Onion; probing or yielding instead costs whole
-/// frames on this dual-core SoC
-const STAMP_PAUSE: Duration = Duration::from_micros(100);
+/// How often the stamper checks whether the app has flipped pages
+const STAMP_POLL: Duration = Duration::from_millis(1);
 
 pub struct FramebufferDisplay {
     pixmap: Pixmap,
@@ -302,7 +301,6 @@ impl Display for FramebufferDisplay {
     }
 
     fn hold_rect(&mut self, area: Rect, corner_radius: u32) -> Result<Option<RectHold>> {
-        self.flush_rect(area)?;
         let Some(stamp) = self.stamp(area, corner_radius) else {
             return Ok(None);
         };
@@ -314,9 +312,25 @@ impl Display for FramebufferDisplay {
             let Ok(mut iface) = Framebuffer::new("/dev/fb0") else {
                 return;
             };
+
+            // Paint every page up front so the plate is present whichever one the app shows next
+            stamp.blit(&mut iface.frame);
+
+            // Then follow the app's page flips rather than blitting blind. A flip is the only
+            // moment the plate can be lost -- the app has just overwritten the page it panned to
+            // -- and repainting immediately gets the plate back well before the panel scans that
+            // far down. Polling one ioctl is far cheaper than the ~134KiB of write-combining
+            // memcpy a blind pass costs, which was consuming most of a core on a dual-core SoC.
+            let mut last_yoffset = iface.var_screen_info.yoffset;
             while !stop.load(Ordering::Relaxed) {
-                stamp.blit(&mut iface.frame);
-                std::thread::sleep(STAMP_PAUSE);
+                std::thread::sleep(STAMP_POLL);
+                let Ok(var) = Framebuffer::get_var_screeninfo(&iface.device) else {
+                    continue;
+                };
+                if var.yoffset != last_yoffset {
+                    last_yoffset = var.yoffset;
+                    stamp.blit(&mut iface.frame);
+                }
             }
         })))
     }
@@ -327,14 +341,22 @@ impl Display for FramebufferDisplay {
         area: Rect,
         corner_radius: u32,
     ) -> Result<bool> {
-        self.flush_rect(area)?;
         let Some(stamp) = self.stamp(area, corner_radius) else {
             return Ok(false);
         };
         let Ok(bytes) = stamp.bytes.lock() else {
             return Ok(false);
         };
-        Ok(hold.update_pixels(&bytes))
+        // Publish first: flushing before this would leave the stamper repainting the previous
+        // value over the one just written
+        if !hold.update_pixels(&bytes) {
+            return Ok(false);
+        }
+        // Dropping the guard matters: blit locks the same mutex
+        drop(bytes);
+        // Show it now rather than waiting for the app's next flip
+        stamp.blit(&mut self.iface.frame);
+        Ok(true)
     }
 
     fn save(&mut self) -> Result<()> {

@@ -141,6 +141,19 @@ settings-power-volume-on-startup = Volume on Startup
 settings-power-volume-on-startup-restore = Restore
 settings-power-volume-on-startup-muted = Muted
 
+settings-power-desc-auto-sleep-when-charging-on = Sleeps on the idle timer even while plugged in.
+settings-power-desc-auto-sleep-when-charging-off = Stays awake while plugged in.
+settings-power-desc-auto-sleep-duration = Powers off after this long with no input.
+settings-power-desc-auto-sleep-duration-disabled = Never powers off on its own.
+settings-power-desc-charging-boot-charge-screen = Plugging in wakes the screen, shows charging, then sleeps.
+settings-power-desc-charging-boot-charge-silently = Plugging in charges without ever lighting the screen.
+settings-power-desc-charging-boot-power-off = Plugging in leaves the device off. Press Power to turn it on.
+settings-power-desc-volume-on-startup-restore = Starts at the volume you last set.
+settings-power-desc-volume-on-startup-muted = Always starts muted.
+settings-power-desc-action-suspend = Blanks the screen. Press Power to come back.
+settings-power-desc-action-shutdown = Powers off, saving your place in the game.
+settings-power-desc-action-nothing = Ignored. Hold Power to force a shutdown.
+
 settings-files = Files
 
 settings-system-update-menu = System Update
@@ -204,6 +217,9 @@ button-confirm = Confirm
 button-edit = Edit
 button-select = Select
 button-launch = Launch
+button-resume = Resume
+button-restart = Restart
+button-options = Options
 button-sort = Sort
 button-edit-search = Edit Search
 button-restore-defaults = Restore Defaults

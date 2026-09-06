@@ -40,7 +40,7 @@ impl Games {
                 vec![ButtonHint::new(
                     res.clone(),
                     Point::zero(),
-                    Key::X,
+                    Key::Y,
                     locale.t("sort-search"),
                     Alignment::Left,
                 )],
@@ -111,7 +111,7 @@ impl View for Games {
         bubble: &mut VecDeque<Command>,
     ) -> Result<bool> {
         match event {
-            KeyEvent::Pressed(Key::X) => {
+            KeyEvent::Pressed(Key::Y) => {
                 commands.send(Command::StartSearch).await?;
                 return Ok(true);
             }

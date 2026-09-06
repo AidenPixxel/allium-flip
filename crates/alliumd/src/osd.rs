@@ -121,7 +121,17 @@ impl<P: Platform> Surface<P> {
         self.display.flush_rect(self.plate.rect)
     }
 
-    fn draw(&mut self, styles: &Stylesheet, kind: OsdKind, fraction: f32) -> Result<()> {
+    /// Paints the plate into the pixmap. `flush` writes the whole rect to the framebuffer, which
+    /// is right when nothing else repaints it -- but wrong under a stamper: the stamp deliberately
+    /// trims the rounded corners so the app's own pixels show through them, whereas a full flush
+    /// would push the frozen frame snapshotted at creation into those corners on every change.
+    fn draw(
+        &mut self,
+        styles: &Stylesheet,
+        kind: OsdKind,
+        fraction: f32,
+        flush: bool,
+    ) -> Result<()> {
         let Plate {
             rect,
             icon,
@@ -170,7 +180,10 @@ impl<P: Platform> Surface<P> {
             );
         }
 
-        self.display.flush_rect(rect)
+        if flush {
+            self.display.flush_rect(rect)?;
+        }
+        Ok(())
     }
 }
 
@@ -221,7 +234,8 @@ impl<P: Platform> Osd<P> {
                 (Refresh::Continuous(_), true) | (Refresh::Periodic { .. }, false)
             );
             if reusable {
-                shown.surface.draw(&self.styles, kind, fraction)?;
+                let flush = matches!(shown.refresh, Refresh::Periodic { .. });
+                shown.surface.draw(&self.styles, kind, fraction, flush)?;
                 let refreshed = match &shown.refresh {
                     Refresh::Continuous(hold) => shown.surface.refresh_plate(hold)?,
                     Refresh::Periodic { .. } => true,
@@ -242,7 +256,7 @@ impl<P: Platform> Osd<P> {
             None => Surface::new(platform, &self.styles)?,
         };
 
-        surface.draw(&self.styles, kind, fraction)?;
+        surface.draw(&self.styles, kind, fraction, !repainting)?;
 
         let periodic = Refresh::Periodic {
             next_redraw: now + UI_REDRAW_PERIOD,
@@ -252,8 +266,11 @@ impl<P: Platform> Osd<P> {
             refresh: if repainting {
                 match surface.hold_plate()? {
                     Some(hold) => Refresh::Continuous(hold),
-                    // Nothing stamps here, so fall back to the static-UI cadence
-                    None => periodic,
+                    None => {
+                        // No stamper after all, so nothing has put the plate on screen yet
+                        surface.flush_plate()?;
+                        periodic
+                    }
                 }
             } else {
                 periodic

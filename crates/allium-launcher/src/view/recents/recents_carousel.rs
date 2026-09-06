@@ -55,13 +55,20 @@ impl RecentsCarousel {
                         res.clone(),
                         Point::zero(),
                         Key::A,
-                        locale.t("button-select"),
+                        locale.t("button-resume"),
                         Alignment::Right,
                     ),
                     ButtonHint::new(
                         res.clone(),
                         Point::zero(),
                         Key::X,
+                        locale.t("button-restart"),
+                        Alignment::Right,
+                    ),
+                    ButtonHint::new(
+                        res.clone(),
+                        Point::zero(),
+                        Key::Y,
                         locale.t("sort-search"),
                         Alignment::Right,
                     ),
@@ -199,12 +206,13 @@ impl RecentsCarousel {
         Ok(())
     }
 
-    async fn launch_game(&mut self, commands: Sender<Command>) -> Result<()> {
+    /// `restart` starts the game from the beginning instead of resuming its auto save state.
+    async fn launch_game(&mut self, commands: Sender<Command>, restart: bool) -> Result<()> {
         if let Some(game) = self.games.get_mut(self.selected) {
             let command =
                 self.res
                     .get::<ConsoleMapper>()
-                    .launch_game(&self.res.get(), game, false)?;
+                    .launch_game(&self.res.get(), game, restart)?;
             if let Some(cmd) = command {
                 commands.send(cmd).await?;
             }
@@ -286,10 +294,14 @@ impl View for RecentsCarousel {
                 Ok(true)
             }
             KeyEvent::Pressed(Key::A) => {
-                self.launch_game(commands).await?;
+                self.launch_game(commands, false).await?;
                 Ok(true)
             }
             KeyEvent::Pressed(Key::X) => {
+                self.launch_game(commands, true).await?;
+                Ok(true)
+            }
+            KeyEvent::Pressed(Key::Y) => {
                 commands.send(Command::StartSearch).await?;
                 Ok(true)
             }
