@@ -191,10 +191,11 @@ where
                     self.child = Some(Box::new(child));
                 }
                 Entry::Game(game) => {
-                    let command =
-                        self.res
-                            .get::<ConsoleMapper>()
-                            .launch_game(&self.res.get(), game, restart)?;
+                    let command = self.res.get::<ConsoleMapper>().launch_game(
+                        &self.res.get(),
+                        game,
+                        restart,
+                    )?;
                     if let Some(cmd) = command {
                         commands.send(cmd).await?;
                     }

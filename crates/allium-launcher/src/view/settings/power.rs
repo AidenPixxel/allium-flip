@@ -415,7 +415,11 @@ impl View for Power {
     }
 
     fn children_mut(&mut self) -> Vec<&mut dyn View> {
-        vec![&mut self.list, &mut self.description, &mut self.button_hints]
+        vec![
+            &mut self.list,
+            &mut self.description,
+            &mut self.button_hints,
+        ]
     }
 
     fn bounding_box(&mut self, _styles: &Stylesheet) -> Rect {

@@ -253,7 +253,6 @@ impl SearchResultsView {
 
         Ok(())
     }
-
 }
 
 #[async_trait(?Send)]
