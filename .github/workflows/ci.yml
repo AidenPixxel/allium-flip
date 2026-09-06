@@ -3,8 +3,12 @@ name: CI
 on:
   pull_request:
   push:
-    # Tags are handled by the Release workflow, which runs the same build.
-    # Without this every `git push --tags` would do the full RetroArch build twice.
+    # Tags are handled by the Release workflow, which runs the same build; without
+    # tags-ignore every `git push --tags` would do the full RetroArch build twice.
+    # `branches` must be listed too: with only tags-ignore, GitHub runs the workflow
+    # for no branch push at all.
+    branches:
+      - '**'
     tags-ignore:
       - '**'
 
