@@ -217,6 +217,12 @@ impl AlliumLauncher<DefaultPlatform> {
                     self.view.set_should_draw();
                 }
             }
+            Command::ApplyDisplaySettings(settings) => {
+                // Live preview: drive the panel but leave display.json alone, so holding a
+                // slider doesn't write to the SD card on every keypress
+                self.platform
+                    .set_display_settings(&mut settings.effective())?;
+            }
             Command::SaveDisplaySettings(settings) => {
                 debug!("saving display settings");
                 // Apply through `effective` so editing a slider while night mode is on doesn't

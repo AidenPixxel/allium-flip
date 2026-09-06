@@ -79,21 +79,25 @@ impl View for Percentage {
                 KeyEvent::Pressed(Key::Up) | KeyEvent::Autorepeat(Key::Up) => {
                     *value = (*value + 1).clamp(self.min, self.max);
                     self.label.set_text(format!("{}%", *value));
+                    bubble.push_back(Command::ValuePreview(0, Value::Int(*value)));
                     return Ok(true);
                 }
                 KeyEvent::Pressed(Key::Down) | KeyEvent::Autorepeat(Key::Down) => {
                     *value = (*value - 1).clamp(self.min, self.max);
                     self.label.set_text(format!("{}%", *value));
+                    bubble.push_back(Command::ValuePreview(0, Value::Int(*value)));
                     return Ok(true);
                 }
                 KeyEvent::Pressed(Key::Left) | KeyEvent::Autorepeat(Key::Left) => {
                     *value = (*value - 5).clamp(self.min, self.max);
                     self.label.set_text(format!("{}%", *value));
+                    bubble.push_back(Command::ValuePreview(0, Value::Int(*value)));
                     return Ok(true);
                 }
                 KeyEvent::Pressed(Key::Right) | KeyEvent::Autorepeat(Key::Right) => {
                     *value = (*value + 5).clamp(self.min, self.max);
                     self.label.set_text(format!("{}%", *value));
+                    bubble.push_back(Command::ValuePreview(0, Value::Int(*value)));
                     return Ok(true);
                 }
                 KeyEvent::Pressed(Key::A) => {
@@ -106,6 +110,9 @@ impl View for Percentage {
                 KeyEvent::Pressed(Key::B) => {
                     self.edit_state = None;
                     self.label.set_text(format!("{}%", self.value));
+                    // Cancelling has to undo any live preview, or the hardware keeps the value
+                    // the label just discarded
+                    bubble.push_back(Command::ValuePreview(0, Value::Int(self.value)));
                     bubble.push_back(Command::Unfocus);
                     Ok(true)
                 }

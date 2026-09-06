@@ -63,6 +63,11 @@ settings-display-green = Green
 settings-display-blue = Blue
 settings-display-screen-resolution = Screen Resolution
 
+settings-night-mode = Night Mode
+settings-night-mode-enabled = Enabled
+settings-night-mode-warmth = Warmth
+settings-night-mode-dimness = Dimness
+
 settings-theme = Theme
 settings-theme-theme = Theme
 settings-theme-wallpaper = Wallpaper

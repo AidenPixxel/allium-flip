@@ -96,8 +96,9 @@ pub const NIGHT_MODE_LUMINANCE_SCALE: f32 = 0.55;
 pub const NIGHT_MODE_GREEN_SCALE: f32 = 0.72;
 pub const NIGHT_MODE_BLUE_SCALE: f32 = 0.35;
 /// Floor for the scaled green/blue channels. The platform flattens all three channels back to
-/// neutral grey when every one of them falls below 15, which would cancel the tint entirely.
-pub const NIGHT_MODE_CHANNEL_FLOOR: u8 = 8;
+/// neutral grey when *every* one of them falls below 15, which would cancel the tint entirely.
+/// Holding green and blue at 15 makes that condition unreachable whatever the user's base red is.
+pub const NIGHT_MODE_CHANNEL_FLOOR: u8 = 15;
 
 /// How long the daemon waits for a keypress before powering back off after a charger-triggered
 /// boot, so pressing Power while the cable is attached still turns the device on.

@@ -2,6 +2,7 @@ mod about;
 mod clock;
 mod display;
 mod language;
+mod night_mode;
 mod power;
 mod system;
 mod theme;
@@ -12,6 +13,7 @@ use crate::view::settings::clock::Clock;
 use self::about::About;
 use self::display::Display;
 use self::language::Language;
+use self::night_mode::NightMode;
 use self::power::Power;
 use self::system::SystemUpdate;
 use self::theme::Theme;
@@ -73,7 +75,7 @@ impl Settings {
         let styles = res.get::<Stylesheet>();
 
         let has_wifi = DefaultPlatform::has_wifi();
-        let mut labels = Vec::with_capacity(8);
+        let mut labels = Vec::with_capacity(9);
         if has_wifi {
             labels.push(locale.t("settings-system-update-menu"));
             labels.push(locale.t("settings-wifi"));
@@ -81,6 +83,7 @@ impl Settings {
         labels.push(locale.t("settings-clock"));
         labels.push(locale.t("settings-power"));
         labels.push(locale.t("settings-display"));
+        labels.push(locale.t("settings-night-mode"));
         labels.push(locale.t("settings-theme"));
         labels.push(locale.t("settings-language"));
         labels.push(locale.t("settings-about"));
@@ -110,9 +113,10 @@ impl Settings {
                 2 => Some(Box::new(Clock::new(rect, res.clone(), Some(child)))),
                 3 => Some(Box::new(Power::new(rect, res.clone(), Some(child)))),
                 4 => Some(Box::new(Display::new(rect, res.clone(), Some(child)))),
-                5 => Some(Box::new(Theme::new(rect, res.clone(), Some(child)))),
-                6 => Some(Box::new(Language::new(rect, res.clone(), Some(child)))),
-                7 => Some(Box::new(About::new(rect, res.clone(), Some(child)))),
+                5 => Some(Box::new(NightMode::new(rect, res.clone(), Some(child)))),
+                6 => Some(Box::new(Theme::new(rect, res.clone(), Some(child)))),
+                7 => Some(Box::new(Language::new(rect, res.clone(), Some(child)))),
+                8 => Some(Box::new(About::new(rect, res.clone(), Some(child)))),
                 _ => None,
             }
         } else {
@@ -177,9 +181,10 @@ impl Settings {
             2 => self.child = Some(Box::new(Clock::new(self.rect, self.res.clone(), None))),
             3 => self.child = Some(Box::new(Power::new(self.rect, self.res.clone(), None))),
             4 => self.child = Some(Box::new(Display::new(self.rect, self.res.clone(), None))),
-            5 => self.child = Some(Box::new(Theme::new(self.rect, self.res.clone(), None))),
-            6 => self.child = Some(Box::new(Language::new(self.rect, self.res.clone(), None))),
-            7 => self.child = Some(Box::new(About::new(self.rect, self.res.clone(), None))),
+            5 => self.child = Some(Box::new(NightMode::new(self.rect, self.res.clone(), None))),
+            6 => self.child = Some(Box::new(Theme::new(self.rect, self.res.clone(), None))),
+            7 => self.child = Some(Box::new(Language::new(self.rect, self.res.clone(), None))),
+            8 => self.child = Some(Box::new(About::new(self.rect, self.res.clone(), None))),
             _ => unreachable!("Invalid index"),
         }
         self.dirty = true;

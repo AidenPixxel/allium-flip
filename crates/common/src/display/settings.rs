@@ -25,6 +25,21 @@ pub struct DisplaySettings {
     /// never folded into them: see [`DisplaySettings::effective`].
     #[serde(default)]
     pub night_mode: bool,
+    /// How far night mode cuts green and blue, 0 (no tint) to 100 (the full warm shift).
+    #[serde(default = "default_night_mode_strength")]
+    pub night_mode_warmth: u8,
+    /// How far night mode dims the panel, 0 (no dimming) to 100 (the full dim).
+    /// Independent of warmth, since wanting one without the other is common.
+    #[serde(default = "default_night_mode_strength")]
+    pub night_mode_dimness: u8,
+}
+
+/// Both strength sliders default to full, so night mode out of the box matches the tuned look
+/// the constants describe.
+pub const DEFAULT_NIGHT_MODE_STRENGTH: u8 = 100;
+
+fn default_night_mode_strength() -> u8 {
+    DEFAULT_NIGHT_MODE_STRENGTH
 }
 
 impl DisplaySettings {
@@ -40,17 +55,35 @@ impl DisplaySettings {
             return self.clone();
         }
 
+        // Eases a scale between 1.0 (slider at 0) and `full` (slider at 100)
+        fn strength(full: f32, percent: u8) -> f32 {
+            1.0 - (1.0 - full) * f32::from(percent.min(100)) / 100.0
+        }
+
         fn scale(value: u8, factor: f32, floor: u8) -> u8 {
             ((f32::from(value) * factor).round() as u8).max(floor)
         }
 
+        let warmth = self.night_mode_warmth;
         Self {
-            luminance: scale(self.luminance, NIGHT_MODE_LUMINANCE_SCALE, 1),
+            luminance: scale(
+                self.luminance,
+                strength(NIGHT_MODE_LUMINANCE_SCALE, self.night_mode_dimness),
+                1,
+            ),
             // Cutting green and blue while leaving red alone is what warms the panel. The floor
-            // keeps red dominant even from a very dim base, where the platform would otherwise
-            // flatten all three channels back to neutral grey.
-            g: scale(self.g, NIGHT_MODE_GREEN_SCALE, NIGHT_MODE_CHANNEL_FLOOR),
-            b: scale(self.b, NIGHT_MODE_BLUE_SCALE, NIGHT_MODE_CHANNEL_FLOOR),
+            // keeps both above the threshold at which the platform gives up and flattens all
+            // three channels back to neutral grey, which would cancel the tint outright.
+            g: scale(
+                self.g,
+                strength(NIGHT_MODE_GREEN_SCALE, warmth),
+                NIGHT_MODE_CHANNEL_FLOOR,
+            ),
+            b: scale(
+                self.b,
+                strength(NIGHT_MODE_BLUE_SCALE, warmth),
+                NIGHT_MODE_CHANNEL_FLOOR,
+            ),
             ..self.clone()
         }
     }
@@ -87,6 +120,8 @@ impl Default for DisplaySettings {
             g: 50,
             b: 50,
             night_mode: false,
+            night_mode_warmth: DEFAULT_NIGHT_MODE_STRENGTH,
+            night_mode_dimness: DEFAULT_NIGHT_MODE_STRENGTH,
         }
     }
 }
@@ -122,21 +157,72 @@ mod tests {
     }
 
     #[test]
-    fn night_mode_from_a_dim_base_keeps_red_dominant() {
-        // The platform flattens r/g/b to neutral grey when all three fall below 15, which would
-        // silently cancel the tint. The channel floor exists to keep that from happening.
-        let night = DisplaySettings {
-            r: 20,
-            g: 20,
-            b: 20,
+    fn night_mode_can_never_trip_the_platform_flatten() {
+        // MiyooPlatform::set_display_settings resets r/g/b to 15 when *all three* fall below 15,
+        // which silently cancels the tint. The floor makes that unreachable -- including from a
+        // base whose red is itself under the threshold, which is the case an earlier floor of 8
+        // did not cover.
+        for (r, g, b) in [(20, 20, 20), (10, 50, 50), (1, 1, 1)] {
+            let night = DisplaySettings {
+                r,
+                g,
+                b,
+                night_mode: true,
+                ..DisplaySettings::new()
+            }
+            .effective();
+
+            assert!(night.g >= NIGHT_MODE_CHANNEL_FLOOR, "green floored");
+            assert!(night.b >= NIGHT_MODE_CHANNEL_FLOOR, "blue floored");
+            assert!(
+                !(night.r < 15 && night.g < 15 && night.b < 15),
+                "flatten would fire for base ({r}, {g}, {b})"
+            );
+            assert!(night.g >= night.b, "green is never cut below blue");
+        }
+    }
+
+    #[test]
+    fn strength_sliders_scale_the_effect() {
+        let base = DisplaySettings {
             night_mode: true,
             ..DisplaySettings::new()
+        };
+
+        // At 0 the sliders are a no-op even with night mode enabled
+        let off = DisplaySettings {
+            night_mode_warmth: 0,
+            night_mode_dimness: 0,
+            ..base.clone()
         }
         .effective();
+        assert_eq!(off.luminance, base.luminance);
+        assert_eq!((off.g, off.b), (base.g, base.b));
 
-        assert!(night.g >= NIGHT_MODE_CHANNEL_FLOOR);
-        assert!(night.b >= NIGHT_MODE_CHANNEL_FLOOR);
-        assert!(night.r > night.g && night.g > night.b);
+        // At 100 it matches the tuned constants
+        let full = base.effective();
+        assert!(full.luminance < base.luminance);
+        assert!(full.b < full.g && full.g < full.r);
+
+        // Half strength sits between the two
+        let half = DisplaySettings {
+            night_mode_warmth: 50,
+            night_mode_dimness: 50,
+            ..base.clone()
+        }
+        .effective();
+        assert!(half.luminance > full.luminance && half.luminance < base.luminance);
+        assert!(half.b > full.b && half.b < base.b);
+
+        // The two are independent: dimness alone must not touch colour
+        let dim_only = DisplaySettings {
+            night_mode_warmth: 0,
+            night_mode_dimness: 100,
+            ..base.clone()
+        }
+        .effective();
+        assert_eq!((dim_only.g, dim_only.b), (base.g, base.b));
+        assert_eq!(dim_only.luminance, full.luminance);
     }
 
     #[test]
@@ -158,5 +244,9 @@ mod tests {
         let parsed: DisplaySettings = serde_json::from_str(legacy).unwrap();
         assert_eq!(parsed.luminance, 40);
         assert!(!parsed.night_mode);
+        // Missing strength fields must default to full, not to zero, or night mode would come
+        // back from an upgrade doing nothing at all
+        assert_eq!(parsed.night_mode_warmth, DEFAULT_NIGHT_MODE_STRENGTH);
+        assert_eq!(parsed.night_mode_dimness, DEFAULT_NIGHT_MODE_STRENGTH);
     }
 }
