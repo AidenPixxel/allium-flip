@@ -1,5 +1,9 @@
 # Allium
 
+> This is a personal fork of [Allium](https://github.com/goweiwen/Allium) by Wei Wen Goh, with
+> modifications for the Miyoo Mini Flip. The upstream commit history is not preserved here; see
+> the original repository for it. Allium is MIT licensed — see [LICENSE](LICENSE).
+
 [![Discord](https://img.shields.io/discord/1442105622320513137?style=flat&logo=discord&logoColor=white&label=Discord)](https://discord.gg/eSvVqe6c8n)
 
 Allium is a custom launcher for the Miyoo Mini, Miyoo Mini Plus, and Miyoo Mini Flip handheld devices, similar to [OnionOS](https://github.com/OnionUI/Onion) and [MiniUI](https://github.com/shauninman/MiniUI).
