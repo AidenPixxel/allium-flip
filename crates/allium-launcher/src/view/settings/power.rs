@@ -9,7 +9,7 @@ use common::display::Display as DisplayTrait;
 use common::geom::{Alignment, Point, Rect};
 use common::locale::Locale;
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
-use common::power::{PowerButtonAction, PowerSettings, VolumeOnStartup};
+use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
 use common::resources::Resources;
 use common::stylesheet::Stylesheet;
 use common::view::{ButtonHint, ButtonHints, Number, Select, SettingsList, Toggle, View};
@@ -22,8 +22,32 @@ pub struct Power {
     res: Resources,
     rect: Rect,
     power_settings: PowerSettings,
+    /// The options offered by the charging boot action row, in display order. The list is
+    /// device-dependent, so the Select index has to be mapped back through it.
+    charging_boot_actions: Vec<ChargingBootAction>,
     list: SettingsList,
     button_hints: ButtonHints<String>,
+}
+
+/// Powering off is hidden where `shutdown` can only reboot, which would make plugging in a
+/// charger loop the device through boot forever.
+fn charging_boot_actions() -> Vec<ChargingBootAction> {
+    let mut actions = vec![
+        ChargingBootAction::ChargeScreen,
+        ChargingBootAction::ChargeSilently,
+    ];
+    if DefaultPlatform::can_power_off() {
+        actions.push(ChargingBootAction::PowerOff);
+    }
+    actions
+}
+
+fn charging_boot_action_key(action: ChargingBootAction) -> &'static str {
+    match action {
+        ChargingBootAction::ChargeScreen => "settings-power-charging-boot-action-charge-screen",
+        ChargingBootAction::ChargeSilently => "settings-power-charging-boot-action-charge-silently",
+        ChargingBootAction::PowerOff => "settings-power-charging-boot-action-power-off",
+    }
 }
 
 impl Power {
@@ -36,6 +60,8 @@ impl Power {
 
         let auto_sleep_duration_disabled_label =
             locale.t("settings-power-auto-sleep-duration-disabled");
+
+        let charging_boot_actions = charging_boot_actions();
 
         let mut button_hints = ButtonHints::new(
             res.clone(),
@@ -85,6 +111,21 @@ impl Power {
                             x.to_string()
                         }
                     },
+                    Alignment::Right,
+                )),
+            ),
+            (
+                locale.t("settings-power-charging-boot-action"),
+                Box::new(Select::new(
+                    Point::zero(),
+                    charging_boot_actions
+                        .iter()
+                        .position(|a| *a == power_settings.charging_boot_action)
+                        .unwrap_or_default(),
+                    charging_boot_actions
+                        .iter()
+                        .map(|a| locale.t(charging_boot_action_key(*a)))
+                        .collect(),
                     Alignment::Right,
                 )),
             ),
@@ -154,6 +195,7 @@ impl Power {
             res,
             rect,
             power_settings,
+            charging_boot_actions,
             list,
             button_hints,
         }
@@ -217,18 +259,28 @@ impl View for Power {
                             toast_needs_restart_for_effect(&self.res, &commands).await?;
                         }
                         2 => {
+                            // The option list is device-dependent, so index through it rather
+                            // than treating the Select index as the enum discriminant.
+                            self.power_settings.charging_boot_action = self
+                                .charging_boot_actions
+                                .get(val.as_int().unwrap() as usize)
+                                .copied()
+                                .unwrap_or_default();
+                            toast_needs_restart_for_effect(&self.res, &commands).await?;
+                        }
+                        3 => {
                             self.power_settings.volume_on_startup =
                                 VolumeOnStartup::from_repr(val.as_int().unwrap() as usize)
                                     .unwrap_or_default();
                             toast_needs_restart_for_effect(&self.res, &commands).await?;
                         }
-                        3 => {
+                        4 => {
                             self.power_settings.power_button_action =
                                 PowerButtonAction::from_repr(val.as_int().unwrap() as usize)
                                     .unwrap_or_default();
                             toast_needs_restart_for_effect(&self.res, &commands).await?;
                         }
-                        4 => {
+                        5 => {
                             self.power_settings.lid_close_action =
                                 PowerButtonAction::from_repr(val.as_int().unwrap() as usize)
                                     .unwrap_or_default();

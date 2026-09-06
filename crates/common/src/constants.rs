@@ -89,6 +89,10 @@ pub const MAX_VOLUME: i32 = 20;
 /// Brightness scale is 0..=MAX_BRIGHTNESS percent.
 pub const MAX_BRIGHTNESS: u8 = 100;
 
+/// How long the daemon waits for a keypress before powering back off after a charger-triggered
+/// boot, so pressing Power while the cable is attached still turns the device on.
+pub const CHARGE_POWER_OFF_GRACE: Duration = Duration::from_millis(1500);
+
 /// After the battery level drops below this threshold, the charging LED will blink at 0.5Hz.
 pub const BATTERY_WARNING_THRESHOLD: i32 = 15;
 /// After the battery level drops below this threshold, the device will shut down.

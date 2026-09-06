@@ -70,6 +70,13 @@ pub trait Platform {
 
     fn has_lid() -> bool;
 
+    /// Whether [`Platform::shutdown`] actually powers the device off. False where the board has no
+    /// PMIC power-off and can only reboot, which would turn "power off while charging" into a boot
+    /// loop.
+    fn can_power_off() -> bool {
+        true
+    }
+
     fn daemon(&self) {}
 }
 

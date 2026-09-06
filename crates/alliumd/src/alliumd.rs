@@ -11,12 +11,12 @@ use chrono::{DateTime, Duration, Utc};
 use common::battery::Battery;
 use common::constants::{
     ALLIUM_GAME_INFO, ALLIUM_LAUNCHER, ALLIUM_SD_ROOT, ALLIUM_VERSION, ALLIUMD_STATE,
-    BATTERY_SHUTDOWN_THRESHOLD, BATTERY_UPDATE_INTERVAL, BATTERY_WARNING_THRESHOLD, IDLE_TIMEOUT,
-    MAX_BRIGHTNESS, MAX_VOLUME,
+    BATTERY_SHUTDOWN_THRESHOLD, BATTERY_UPDATE_INTERVAL, BATTERY_WARNING_THRESHOLD,
+    CHARGE_POWER_OFF_GRACE, IDLE_TIMEOUT, MAX_BRIGHTNESS, MAX_VOLUME,
 };
 use common::display::settings::DisplaySettings;
 use common::locale::{Locale, LocaleSettings};
-use common::power::{PowerButtonAction, PowerSettings, VolumeOnStartup};
+use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
 use common::retroarch::RetroArchCommand;
 use common::stylesheet::Stylesheet;
 use common::wifi::WiFiSettings;
@@ -278,11 +278,16 @@ impl AlliumD<DefaultPlatform> {
 
             let mut battery_interval = Instant::now();
 
-            // If battery is charging, suspend.
+            // Charging at this point means the device was booted by the charger being plugged in
+            // (or by the user pressing Power with the cable already attached).
             let mut battery = self.platform.battery()?;
             battery.update()?;
             if battery.charging() {
-                self.handle_charging().await?;
+                match self.charging_boot_action() {
+                    ChargingBootAction::ChargeScreen => self.handle_charging(true).await?,
+                    ChargingBootAction::ChargeSilently => self.handle_charging(false).await?,
+                    ChargingBootAction::PowerOff => self.handle_charging_power_off().await?,
+                }
             }
 
             let mut battery_led_task = None;
@@ -523,23 +528,64 @@ impl AlliumD<DefaultPlatform> {
         Ok(())
     }
 
+    /// The configured charging boot action, falling back to charging silently where the board
+    /// cannot actually power off (`shutdown` would reboot straight back into this branch).
     #[cfg(unix)]
-    async fn handle_charging(&mut self) -> Result<()> {
+    fn charging_boot_action(&self) -> ChargingBootAction {
+        let action = self.power_settings.charging_boot_action;
+        if action == ChargingBootAction::PowerOff && !DefaultPlatform::can_power_off() {
+            warn!("this device cannot power off, charging silently instead");
+            return ChargingBootAction::ChargeSilently;
+        }
+        action
+    }
+
+    /// Power back down after a charger-triggered boot, unless the user is actually trying to turn
+    /// the device on. We can't tell those two apart — both just look like "charging at startup" —
+    /// so wait briefly for a keypress first. The screen stays dark throughout.
+    #[cfg(unix)]
+    async fn handle_charging_power_off(&mut self) -> Result<()> {
+        info!("charging, powering off unless a key is pressed");
+
+        self.hide_osd();
+
+        // `poll` only ever resolves on a real key or lid event, so anything at all here means a
+        // person is at the device.
+        let woken = tokio::select! {
+            _ = self.platform.poll() => true,
+            _ = tokio::time::sleep(CHARGE_POWER_OFF_GRACE) => false,
+        };
+
+        if woken {
+            info!("key pressed while charging, booting normally");
+            return Ok(());
+        }
+
+        self.platform.shutdown()
+    }
+
+    /// Park in the charge screen until the user presses Power or unplugs the cable. With
+    /// `announce` the display lights up and says "Charging" first; without it the screen is never
+    /// turned on at all.
+    #[cfg(unix)]
+    async fn handle_charging(&mut self, announce: bool) -> Result<()> {
         info!("charging...");
 
         self.hide_osd();
 
         signal(&self.main, Signal::SIGSTOP)?;
 
-        Command::new("say")
-            .arg(self.locale.t("charging"))
-            .spawn()?
-            .wait()
-            .await?;
+        if announce {
+            Command::new("say")
+                .arg(self.locale.t("charging"))
+                .spawn()?
+                .wait()
+                .await?;
 
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-        Command::new("show").arg("-c").spawn()?.wait().await?;
+            Command::new("show").arg("-c").spawn()?.wait().await?;
+        }
 
         #[allow(clippy::let_unit_value)]
         let ctx = self.platform.suspend()?;

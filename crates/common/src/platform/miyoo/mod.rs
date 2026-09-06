@@ -189,6 +189,14 @@ impl Platform for MiyooPlatform {
         }
     }
 
+    fn can_power_off() -> bool {
+        // `shutdown` reboots on the MY283, which has no PMIC power-off.
+        match detect_model() {
+            MiyooDeviceModel::Miyoo283 => false,
+            MiyooDeviceModel::Miyoo285 | MiyooDeviceModel::Miyoo354 => true,
+        }
+    }
+
     fn daemon(&self) {
         log::info!("Starting Miyoo platform daemon for model {}", self.model);
         if self.model == MiyooDeviceModel::Miyoo285 {

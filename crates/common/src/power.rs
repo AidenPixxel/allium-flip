@@ -15,6 +15,20 @@ pub struct PowerSettings {
     pub auto_sleep_duration_minutes: i32,
     #[serde(default)]
     pub volume_on_startup: VolumeOnStartup,
+    #[serde(default)]
+    pub charging_boot_action: ChargingBootAction,
+}
+
+/// What happens when the device powers on only because a charger was plugged in.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, FromRepr, Default)]
+pub enum ChargingBootAction {
+    /// Announce "Charging", hold the lit screen briefly, then park in the charge screen.
+    #[default]
+    ChargeScreen,
+    /// Park in the charge screen without ever lighting the display.
+    ChargeSilently,
+    /// Shut back down, so the charger never wakes the device at all.
+    PowerOff,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, FromRepr, Default)]
@@ -54,6 +68,7 @@ impl Default for PowerSettings {
             auto_sleep_when_charging: true,
             auto_sleep_duration_minutes: 5,
             volume_on_startup: VolumeOnStartup::Restore,
+            charging_boot_action: ChargingBootAction::ChargeScreen,
         }
     }
 }
@@ -80,5 +95,39 @@ impl PowerSettings {
         let file = File::create(ALLIUM_POWER_SETTINGS.as_path())?;
         serde_json::to_writer(file, &self)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_power_files_still_parse() {
+        // `load` deletes power.json and resets every power setting on a parse failure, so a file
+        // written before `charging_boot_action` existed must still deserialize.
+        let legacy = r#"{
+            "power_button_action": "Suspend",
+            "lid_close_action": "Shutdown",
+            "auto_sleep_when_charging": false,
+            "auto_sleep_duration_minutes": 15
+        }"#;
+
+        let parsed: PowerSettings = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.auto_sleep_duration_minutes, 15);
+        assert!(!parsed.auto_sleep_when_charging);
+        assert_eq!(
+            parsed.charging_boot_action,
+            ChargingBootAction::ChargeScreen
+        );
+    }
+
+    #[test]
+    fn charging_boot_action_round_trips() {
+        let json = serde_json::to_string(&ChargingBootAction::PowerOff).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ChargingBootAction>(&json).unwrap(),
+            ChargingBootAction::PowerOff
+        );
     }
 }
