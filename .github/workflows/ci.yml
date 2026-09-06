@@ -3,6 +3,10 @@ name: CI
 on:
   pull_request:
   push:
+    # Tags are handled by the Release workflow, which runs the same build.
+    # Without this every `git push --tags` would do the full RetroArch build twice.
+    tags-ignore:
+      - '**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
