@@ -20,7 +20,11 @@ static UPDATE_FILE_PATH: LazyLock<PathBuf> =
 /// Update channel selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum UpdateChannel {
+    /// Never contact GitHub. The default for this fork: the OTA payload is upstream's, so an
+    /// update would restore every core trimmed from this build and overwrite the custom
+    /// alliumd/allium-launcher binaries with stock ones.
     #[default]
+    Off,
     Stable,
     Nightly,
 }
@@ -99,6 +103,11 @@ pub async fn check_for_update(channel: UpdateChannel) -> Result<Option<GitHubRel
     info!("Current version: {}", current_version);
 
     let release = match channel {
+        // Bail out before any network call
+        UpdateChannel::Off => {
+            info!("Update channel is off, skipping update check");
+            return Ok(None);
+        }
         UpdateChannel::Stable => get_latest_stable_release().await?,
         UpdateChannel::Nightly => get_latest_nightly_release().await?,
     };
