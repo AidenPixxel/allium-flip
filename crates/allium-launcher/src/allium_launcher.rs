@@ -221,14 +221,14 @@ impl AlliumLauncher<DefaultPlatform> {
                 // Live preview: drive the panel but leave display.json alone, so holding a
                 // slider doesn't write to the SD card on every keypress
                 self.platform
-                    .set_display_settings(&mut settings.effective())?;
+                    .set_display_settings(&mut settings.active().effective())?;
             }
             Command::SaveDisplaySettings(settings) => {
                 debug!("saving display settings");
-                // Apply through `effective` so editing a slider while night mode is on doesn't
-                // knock the tint out, and persist the untouched base values.
+                // Apply through `effective` so the profile's warmth and dimness are folded in,
+                // and persist the untouched stored values.
                 self.platform
-                    .set_display_settings(&mut settings.effective())?;
+                    .set_display_settings(&mut settings.active().effective())?;
                 settings.save()?;
             }
             Command::SaveLocaleSettings(settings) => {

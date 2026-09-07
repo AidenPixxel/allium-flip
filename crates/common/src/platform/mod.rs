@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     battery::Battery,
-    display::{Display, settings::DisplaySettings},
+    display::{Display, settings::DisplayProfile},
 };
 
 #[cfg(feature = "miyoo")]
@@ -60,7 +60,7 @@ pub trait Platform {
 
     fn set_brightness(&mut self, brightness: u8) -> Result<()>;
 
-    fn set_display_settings(&mut self, settings: &mut DisplaySettings) -> Result<()>;
+    fn set_display_settings(&mut self, profile: &mut DisplayProfile) -> Result<()>;
 
     fn device_model() -> String;
 

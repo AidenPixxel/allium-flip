@@ -13,7 +13,7 @@ pub enum Command {
     Exec(std::process::Command),
     ReloadStylesheet(Box<Stylesheet>, bool),
     SaveDisplaySettings(Box<DisplaySettings>),
-    /// Apply display settings to the panel without writing them to disk, so a slider can preview
+    /// Apply the active profile to the panel without writing to disk, so a slider can preview
     /// live without an SD-card write per keypress
     ApplyDisplaySettings(Box<DisplaySettings>),
     SaveLocaleSettings(LocaleSettings),

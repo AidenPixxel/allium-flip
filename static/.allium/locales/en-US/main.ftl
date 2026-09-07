@@ -62,11 +62,10 @@ settings-display-red = Red
 settings-display-green = Green
 settings-display-blue = Blue
 settings-display-screen-resolution = Screen Resolution
-
-settings-night-mode = Night Mode
-settings-night-mode-enabled = Enabled
-settings-night-mode-warmth = Warmth
-settings-night-mode-dimness = Dimness
+settings-display-profile = Profile
+settings-display-profile-name = Profile Name
+settings-display-warmth = Warmth
+settings-display-dimness = Dimness
 
 settings-theme = Theme
 settings-theme-theme = Theme

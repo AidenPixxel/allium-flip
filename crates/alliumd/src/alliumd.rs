@@ -29,7 +29,7 @@ use common::database::Database;
 use common::game_info::GameInfo;
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
 
-use crate::osd::{Osd, OsdKind};
+use crate::osd::{Osd, OsdContent, OsdKind};
 
 #[cfg(unix)]
 use {
@@ -234,9 +234,9 @@ impl AlliumD<DefaultPlatform> {
         platform.set_brightness(state.brightness)?;
 
         info!("loading display settings");
-        // `effective` folds in night mode, so it survives a reboot without being baked into the
-        // stored base values.
-        platform.set_display_settings(&mut DisplaySettings::load()?.effective())?;
+        // `effective` folds in the profile's warmth and dimness without baking them into the
+        // stored values, so the active profile survives a reboot.
+        platform.set_display_settings(&mut DisplaySettings::load()?.active().effective())?;
 
         let main = spawn_main().await?;
         let locale = Locale::new(&LocaleSettings::load()?.lang);
@@ -440,7 +440,7 @@ impl AlliumD<DefaultPlatform> {
                     self.add_volume(1)?;
                 }
                 KeyEvent::Pressed(Key::Select) => {
-                    self.toggle_night_mode()?;
+                    self.rotate_display_profile()?;
                 }
                 KeyEvent::Released(Key::Power) => {
                     let game_info = GameInfo::load()?;
@@ -782,32 +782,36 @@ impl AlliumD<DefaultPlatform> {
         Ok(())
     }
 
-    /// Toggle the warm, dimmed night mode. Driven through the display controller's colour
+    /// Rotate to the next display profile. Driven through the display controller's colour
     /// registers rather than the framebuffer, so it applies to RetroArch's frames too.
-    fn toggle_night_mode(&mut self) -> Result<()> {
+    fn rotate_display_profile(&mut self) -> Result<()> {
         let mut settings = DisplaySettings::load()?;
-        settings.night_mode = !settings.night_mode;
-        info!("night mode: {}", settings.night_mode);
+        let active = settings.rotate();
+        let name = settings.name_of(active);
+        info!("display profile: {} ({})", active + 1, name);
 
         // Draw first, matching add_volume/add_brightness
-        self.show_osd(
-            OsdKind::NightMode,
-            if settings.night_mode { 1.0 } else { 0.0 },
-        );
+        self.show_osd_label(OsdKind::DisplayProfile, name);
 
         self.platform
-            .set_display_settings(&mut settings.effective())?;
+            .set_display_settings(&mut settings.active().effective())?;
         settings.save()?;
         Ok(())
     }
 
     fn show_osd(&mut self, kind: OsdKind, fraction: f32) {
+        self.show_osd_content(kind, OsdContent::Bar(fraction));
+    }
+
+    /// Shows text instead of a bar, for something that has a name rather than a level.
+    fn show_osd_label(&mut self, kind: OsdKind, label: String) {
+        self.show_osd_content(kind, OsdContent::Label(label));
+    }
+
+    fn show_osd_content(&mut self, kind: OsdKind, content: OsdContent) {
         let repainting = self.foreground_repaints() && !self.menu_open;
         // Cosmetic only: a failed overlay must not take down the daemon
-        if let Err(e) = self
-            .osd
-            .show(&mut self.platform, kind, fraction, repainting)
-        {
+        if let Err(e) = self.osd.show(&mut self.platform, kind, content, repainting) {
             error!("failed to show OSD: {}", e);
         }
     }

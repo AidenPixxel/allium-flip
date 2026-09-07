@@ -24,7 +24,7 @@ use winit::window::{Window as WinitWindow, WindowId};
 use crate::battery::Battery;
 use crate::display::Display;
 use crate::display::color::Color;
-use crate::display::settings::DisplaySettings;
+use crate::display::settings::DisplayProfile;
 use crate::geom::Rect;
 use crate::platform::{Key, KeyEvent, Platform};
 
@@ -336,7 +336,7 @@ impl Platform for SimulatorPlatform {
         Ok(())
     }
 
-    fn set_display_settings(&mut self, _settings: &mut DisplaySettings) -> Result<()> {
+    fn set_display_settings(&mut self, _profile: &mut DisplayProfile) -> Result<()> {
         Ok(())
     }
 

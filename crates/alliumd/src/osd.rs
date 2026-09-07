@@ -1,10 +1,11 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use common::display::font::FontTextStyleBuilder;
 use common::display::{
     Display, RectHold, draw_moon_icon, draw_speaker_icon, draw_sun_icon, fill_rounded_rect,
 };
-use common::geom::Rect;
+use common::geom::{Point, Rect};
 use common::platform::Platform;
 use common::stylesheet::Stylesheet;
 use tokio::time::Instant;
@@ -21,7 +22,18 @@ const UI_REDRAW_PERIOD: Duration = Duration::from_millis(16);
 pub enum OsdKind {
     Volume,
     Brightness,
-    NightMode,
+    DisplayProfile,
+}
+
+/// What fills the plate beside the icon.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OsdContent {
+    /// A level, drawn as a filled bar
+    Bar(f32),
+    /// A name, drawn as text. Occupies the bar's slot, so the plate stays the same size however
+    /// long the text is -- `Surface` snapshots one fixed rect and restores it, and a plate that
+    /// resized would leave the difference behind.
+    Label(String),
 }
 
 /// The plate and its contents, placed from the framebuffer size and the theme
@@ -130,7 +142,7 @@ impl<P: Platform> Surface<P> {
         &mut self,
         styles: &Stylesheet,
         kind: OsdKind,
-        fraction: f32,
+        content: &OsdContent,
         flush: bool,
     ) -> Result<()> {
         let Plate {
@@ -158,27 +170,46 @@ impl<P: Platform> Surface<P> {
             OsdKind::Brightness => {
                 draw_sun_icon(&mut self.display.pixmap_mut(), icon, styles.ui.text_color)
             }
-            OsdKind::NightMode => {
+            OsdKind::DisplayProfile => {
                 draw_moon_icon(&mut self.display.pixmap_mut(), icon, styles.ui.text_color)
             }
         }
 
-        let bar_radius = bar.h / 2;
-        fill_rounded_rect(
-            &mut self.display.pixmap_mut(),
-            bar,
-            bar_radius,
-            styles.ui.disabled_color,
-        );
-        let fill_w = (bar.w as f32 * fraction.clamp(0.0, 1.0)).round() as u32;
-        if fill_w > 0 {
-            let fill = Rect::new(bar.x, bar.y, fill_w, bar.h);
-            fill_rounded_rect(
-                &mut self.display.pixmap_mut(),
-                fill,
-                bar_radius.min(fill_w / 2),
-                styles.ui.highlight_color,
-            );
+        match content {
+            OsdContent::Bar(fraction) => {
+                let bar_radius = bar.h / 2;
+                fill_rounded_rect(
+                    &mut self.display.pixmap_mut(),
+                    bar,
+                    bar_radius,
+                    styles.ui.disabled_color,
+                );
+                let fill_w = (bar.w as f32 * fraction.clamp(0.0, 1.0)).round() as u32;
+                if fill_w > 0 {
+                    let fill = Rect::new(bar.x, bar.y, fill_w, bar.h);
+                    fill_rounded_rect(
+                        &mut self.display.pixmap_mut(),
+                        fill,
+                        bar_radius.min(fill_w / 2),
+                        styles.ui.highlight_color,
+                    );
+                }
+            }
+            OsdContent::Label(label) => {
+                let text = FontTextStyleBuilder::new(styles.ui.ui_font.font())
+                    .font_fallback(styles.cjk_font.font())
+                    .font_size(styles.ui.ui_font.size)
+                    .text_color(styles.ui.text_color)
+                    .build();
+                // Centred in the bar's slot, and clipped by it: the plate is a fixed size, so a
+                // name wider than the slot must be cut rather than overflow the background
+                let measured = text.measure(label).w.min(bar.w);
+                let pos = Point::new(
+                    bar.x + (bar.w as i32 - measured as i32) / 2,
+                    rect.y + (rect.h as i32 - styles.ui.ui_font.size as i32) / 2,
+                );
+                text.draw(&mut self.display.pixmap_mut(), label, pos);
+            }
         }
 
         if flush {
@@ -221,7 +252,7 @@ impl<P: Platform> Osd<P> {
         &mut self,
         platform: &mut P,
         kind: OsdKind,
-        fraction: f32,
+        content: OsdContent,
         repainting: bool,
     ) -> Result<()> {
         let now = Instant::now();
@@ -236,7 +267,7 @@ impl<P: Platform> Osd<P> {
             );
             if reusable {
                 let flush = matches!(shown.refresh, Refresh::Periodic { .. });
-                shown.surface.draw(&self.styles, kind, fraction, flush)?;
+                shown.surface.draw(&self.styles, kind, &content, flush)?;
                 let refreshed = match &shown.refresh {
                     Refresh::Continuous(hold) => shown.surface.refresh_plate(hold)?,
                     Refresh::Periodic { .. } => true,
@@ -257,7 +288,7 @@ impl<P: Platform> Osd<P> {
             None => Surface::new(platform, &self.styles)?,
         };
 
-        surface.draw(&self.styles, kind, fraction, !repainting)?;
+        surface.draw(&self.styles, kind, &content, !repainting)?;
 
         let periodic = Refresh::Periodic {
             next_redraw: now + UI_REDRAW_PERIOD,

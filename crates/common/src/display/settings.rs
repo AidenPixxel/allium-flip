@@ -12,8 +12,20 @@ use crate::constants::{
     NIGHT_MODE_GREEN_SCALE, NIGHT_MODE_LUMINANCE_SCALE,
 };
 
+/// How many profiles are kept. The rotate hotkey cycles all of them, so keep it small enough to
+/// get back to where you started without thinking about it.
+pub const PROFILE_COUNT: usize = 3;
+/// Names are shown in a list cell and in the on-screen indicator, neither of which scrolls, so a
+/// long one would simply be cut off.
+pub const MAX_PROFILE_NAME_LEN: usize = 12;
+/// The platform raises anything lower, so never store a value the panel will not show.
+pub const MIN_CONTRAST: u8 = 10;
+
+/// One full set of panel values, under a name the user chooses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DisplaySettings {
+#[serde(default)]
+pub struct DisplayProfile {
+    pub name: String,
     pub luminance: u8,
     pub hue: u8,
     pub saturation: u8,
@@ -21,40 +33,33 @@ pub struct DisplaySettings {
     pub r: u8,
     pub g: u8,
     pub b: u8,
-    /// Warmer, dimmer panel for playing in the dark. Stored alongside the base values, but
-    /// never folded into them: see [`DisplaySettings::effective`].
-    #[serde(default)]
-    pub night_mode: bool,
-    /// How far night mode cuts green and blue, 0 (no tint) to 100 (the full warm shift).
-    #[serde(default = "default_night_mode_strength")]
-    pub night_mode_warmth: u8,
-    /// How far night mode dims the panel, 0 (no dimming) to 100 (the full dim).
-    /// Independent of warmth, since wanting one without the other is common.
-    #[serde(default = "default_night_mode_strength")]
-    pub night_mode_dimness: u8,
+    /// How far to cut green and blue, 0 (untouched) to 100 (the full warm shift).
+    pub warmth: u8,
+    /// How far to dim, 0 (untouched) to 100 (the full dim). Independent of warmth, since wanting
+    /// one without the other is common.
+    pub dimness: u8,
 }
 
-/// Both strength sliders default to full, so night mode out of the box matches the tuned look
-/// the constants describe.
-pub const DEFAULT_NIGHT_MODE_STRENGTH: u8 = 100;
-
-fn default_night_mode_strength() -> u8 {
-    DEFAULT_NIGHT_MODE_STRENGTH
-}
-
-impl DisplaySettings {
-    pub fn new() -> Self {
-        Self::default()
+impl DisplayProfile {
+    fn neutral(name: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            luminance: 50,
+            hue: 50,
+            saturation: 50,
+            contrast: 50,
+            r: 50,
+            g: 50,
+            b: 50,
+            warmth: 0,
+            dimness: 0,
+        }
     }
 
-    /// The values actually written to the panel: the user's base settings with the night mode
-    /// warm/dim transform applied on top. Never persisted, so toggling night mode off restores
-    /// the base settings exactly.
+    /// The values actually written to the panel: this profile's own values with its warmth and
+    /// dimness folded in. Never persisted, so turning a slider back down restores exactly what
+    /// was stored.
     pub fn effective(&self) -> Self {
-        if !self.night_mode {
-            return self.clone();
-        }
-
         // Eases a scale between 1.0 (slider at 0) and `full` (slider at 100)
         fn strength(full: f32, percent: u8) -> f32 {
             1.0 - (1.0 - full) * f32::from(percent.min(100)) / 100.0
@@ -64,11 +69,10 @@ impl DisplaySettings {
             ((f32::from(value) * factor).round() as u8).max(floor)
         }
 
-        let warmth = self.night_mode_warmth;
         Self {
             luminance: scale(
                 self.luminance,
-                strength(NIGHT_MODE_LUMINANCE_SCALE, self.night_mode_dimness),
+                strength(NIGHT_MODE_LUMINANCE_SCALE, self.dimness),
                 1,
             ),
             // Cutting green and blue while leaving red alone is what warms the panel. The floor
@@ -76,52 +80,202 @@ impl DisplaySettings {
             // three channels back to neutral grey, which would cancel the tint outright.
             g: scale(
                 self.g,
-                strength(NIGHT_MODE_GREEN_SCALE, warmth),
+                strength(NIGHT_MODE_GREEN_SCALE, self.warmth),
                 NIGHT_MODE_CHANNEL_FLOOR,
             ),
             b: scale(
                 self.b,
-                strength(NIGHT_MODE_BLUE_SCALE, warmth),
+                strength(NIGHT_MODE_BLUE_SCALE, self.warmth),
                 NIGHT_MODE_CHANNEL_FLOOR,
             ),
             ..self.clone()
         }
     }
+}
 
-    pub fn load() -> Result<Self> {
-        if ALLIUM_DISPLAY_SETTINGS.exists() {
-            debug!("found state, loading from file");
-            if let Ok(json) = fs::read_to_string(ALLIUM_DISPLAY_SETTINGS.as_path())
-                && let Ok(json) = serde_json::from_str(&json)
-            {
-                return Ok(json);
+impl Default for DisplayProfile {
+    fn default() -> Self {
+        Self::neutral("")
+    }
+}
+
+/// The stored display configuration: a handful of named profiles and which one is live.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "RawDisplaySettings")]
+pub struct DisplaySettings {
+    pub active: usize,
+    pub profiles: Vec<DisplayProfile>,
+}
+
+/// Mirror of every shape `display.json` has had, so neither can be rejected.
+///
+/// `serde(default)` makes every key optional, and unknown keys are ignored -- which is what lets
+/// the pre-profiles `night_mode`, `night_mode_warmth` and `night_mode_dimness` be dropped rather
+/// than failing the parse. Only `Deserialize` is routed through here; writes are always the
+/// current shape.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct RawDisplaySettings {
+    active: Option<usize>,
+    profiles: Option<Vec<DisplayProfile>>,
+
+    // The flat, single-profile shape
+    luminance: Option<u8>,
+    hue: Option<u8>,
+    saturation: Option<u8>,
+    contrast: Option<u8>,
+    r: Option<u8>,
+    g: Option<u8>,
+    b: Option<u8>,
+}
+
+impl From<RawDisplaySettings> for DisplaySettings {
+    fn from(raw: RawDisplaySettings) -> Self {
+        if let Some(profiles) = raw.profiles.filter(|p| !p.is_empty()) {
+            return Self {
+                active: raw.active.unwrap_or(0),
+                profiles,
             }
-            warn!("failed to read state file, removing");
-            fs::remove_file(ALLIUM_DISPLAY_SETTINGS.as_path())?;
+            .sanitized();
         }
-        Ok(Self::new())
+
+        // A flat file predates profiles, so carry the values the user tuned into the first slot
+        // rather than resetting their panel on upgrade. Their night-mode strengths only meant
+        // anything when night mode was on, and that toggle is gone, so they are dropped.
+        let mut settings = Self::default();
+        let first = &mut settings.profiles[0];
+        let neutral = DisplayProfile::default();
+        first.luminance = raw.luminance.unwrap_or(neutral.luminance);
+        first.hue = raw.hue.unwrap_or(neutral.hue);
+        first.saturation = raw.saturation.unwrap_or(neutral.saturation);
+        first.contrast = raw.contrast.unwrap_or(neutral.contrast);
+        first.r = raw.r.unwrap_or(neutral.r);
+        first.g = raw.g.unwrap_or(neutral.g);
+        first.b = raw.b.unwrap_or(neutral.b);
+        settings.sanitized()
+    }
+}
+
+impl DisplaySettings {
+    pub fn new() -> Self {
+        Self::default()
     }
 
+    /// Clamps the document to the invariants everything downstream relies on, so no caller has to
+    /// bounds-check: always `PROFILE_COUNT` profiles, `active` in range, names short enough to
+    /// display, contrast above the platform's floor.
+    fn sanitized(mut self) -> Self {
+        self.profiles.truncate(PROFILE_COUNT);
+        while self.profiles.len() < PROFILE_COUNT {
+            let i = self.profiles.len();
+            self.profiles.push(Self::default_profile(i));
+        }
+        for profile in &mut self.profiles {
+            profile.contrast = profile.contrast.max(MIN_CONTRAST);
+            profile.name = truncate_name(&profile.name);
+        }
+        self.active = self.active.min(self.profiles.len() - 1);
+        self
+    }
+
+    fn default_profile(index: usize) -> DisplayProfile {
+        match index {
+            0 => DisplayProfile::neutral("Day"),
+            1 => DisplayProfile {
+                warmth: 100,
+                dimness: 100,
+                ..DisplayProfile::neutral("Night")
+            },
+            _ => DisplayProfile::neutral("Custom"),
+        }
+    }
+
+    /// The profile currently driving the panel.
+    pub fn active(&self) -> &DisplayProfile {
+        // `sanitized` keeps `active` in range and `profiles` non-empty
+        &self.profiles[self.active]
+    }
+
+    pub fn active_mut(&mut self) -> &mut DisplayProfile {
+        &mut self.profiles[self.active]
+    }
+
+    /// Advances to the next profile, wrapping, and returns its index.
+    pub fn rotate(&mut self) -> usize {
+        self.active = (self.active + 1) % self.profiles.len();
+        self.active
+    }
+
+    /// What to call profile `index` on screen. Falls back to its position so an emptied name
+    /// still leaves something selectable.
+    pub fn name_of(&self, index: usize) -> String {
+        match self.profiles.get(index) {
+            Some(p) if !p.name.is_empty() => p.name.clone(),
+            _ => format!("{}", index + 1),
+        }
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        (0..self.profiles.len()).map(|i| self.name_of(i)).collect()
+    }
+
+    /// Never deletes the file. A parse failure is far likelier to be a bad migration or a
+    /// half-written file than genuine garbage, and discarding it would silently reset every
+    /// panel value the user has tuned -- so keep a copy and carry on with defaults.
+    pub fn load() -> Result<Self> {
+        let path = ALLIUM_DISPLAY_SETTINGS.as_path();
+        if !path.exists() {
+            return Ok(Self::new());
+        }
+        debug!("found state, loading from file");
+
+        let text = match fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(e) => {
+                warn!("could not read display settings: {}", e);
+                return Ok(Self::new());
+            }
+        };
+
+        match serde_json::from_str(&text) {
+            Ok(settings) => Ok(settings),
+            Err(e) => {
+                warn!(
+                    "display settings did not parse ({}), keeping a .bak copy",
+                    e
+                );
+                let _ = fs::rename(path, path.with_extension("json.bak"));
+                Ok(Self::new())
+            }
+        }
+    }
+
+    /// Writes to a sibling file and renames, so an interrupted write cannot leave truncated JSON
+    /// behind -- which is the input that made the old `load` delete the file.
     pub fn save(&self) -> Result<()> {
-        let json = serde_json::to_string(&self).unwrap();
-        File::create(ALLIUM_DISPLAY_SETTINGS.as_path())?.write_all(json.as_bytes())?;
+        let path = ALLIUM_DISPLAY_SETTINGS.as_path();
+        let tmp = path.with_extension("json.tmp");
+        let json = serde_json::to_string(&self)?;
+        {
+            let mut file = File::create(&tmp)?;
+            file.write_all(json.as_bytes())?;
+            file.sync_all()?;
+        }
+        fs::rename(&tmp, path)?;
         Ok(())
     }
+}
+
+fn truncate_name(name: &str) -> String {
+    // By character, not byte, so a multi-byte name cannot be cut mid-codepoint
+    name.chars().take(MAX_PROFILE_NAME_LEN).collect()
 }
 
 impl Default for DisplaySettings {
     fn default() -> Self {
         Self {
-            luminance: 50,
-            hue: 50,
-            saturation: 50,
-            contrast: 50,
-            r: 50,
-            g: 50,
-            b: 50,
-            night_mode: false,
-            night_mode_warmth: DEFAULT_NIGHT_MODE_STRENGTH,
-            night_mode_dimness: DEFAULT_NIGHT_MODE_STRENGTH,
+            active: 0,
+            profiles: (0..PROFILE_COUNT).map(Self::default_profile).collect(),
         }
     }
 }
@@ -131,122 +285,120 @@ mod tests {
     use super::*;
 
     #[test]
-    fn effective_is_a_noop_when_night_mode_is_off() {
+    fn defaults_are_three_named_profiles() {
         let settings = DisplaySettings::new();
-        assert!(!settings.night_mode);
-        assert_eq!(settings.effective(), settings);
+        assert_eq!(settings.profiles.len(), PROFILE_COUNT);
+        assert_eq!(settings.active, 0);
+        assert_eq!(settings.names(), vec!["Day", "Night", "Custom"]);
+
+        // Day leaves the panel alone; Night is the warm, dim one
+        let day = &settings.profiles[0];
+        assert_eq!((day.warmth, day.dimness), (0, 0));
+        assert_eq!(day.effective(), day.clone());
+
+        let night = settings.profiles[1].effective();
+        assert!(night.luminance < settings.profiles[1].luminance);
+        assert!(night.b < night.g && night.g < night.r);
     }
 
     #[test]
-    fn night_mode_warms_and_dims() {
-        let base = DisplaySettings::new();
-        let night = DisplaySettings {
-            night_mode: true,
-            ..base.clone()
-        }
-        .effective();
-
-        assert!(night.luminance < base.luminance, "night mode should dim");
-        assert_eq!(night.r, base.r, "red is left alone");
-        assert!(night.b < night.g && night.g < night.r, "warm shift");
-
-        // Untouched knobs stay untouched
-        assert_eq!(night.hue, base.hue);
-        assert_eq!(night.saturation, base.saturation);
-        assert_eq!(night.contrast, base.contrast);
+    fn rotate_wraps() {
+        let mut settings = DisplaySettings::new();
+        assert_eq!(settings.rotate(), 1);
+        assert_eq!(settings.rotate(), 2);
+        assert_eq!(settings.rotate(), 0);
+        assert_eq!(settings.active().name, "Day");
     }
 
     #[test]
-    fn night_mode_can_never_trip_the_platform_flatten() {
+    fn effective_can_never_trip_the_platform_flatten() {
         // MiyooPlatform::set_display_settings resets r/g/b to 15 when *all three* fall below 15,
-        // which silently cancels the tint. The floor makes that unreachable -- including from a
-        // base whose red is itself under the threshold, which is the case an earlier floor of 8
-        // did not cover.
+        // which silently cancels the tint. The floor makes that unreachable, including from a
+        // base whose red is itself under the threshold.
         for (r, g, b) in [(20, 20, 20), (10, 50, 50), (1, 1, 1)] {
-            let night = DisplaySettings {
+            let profile = DisplayProfile {
                 r,
                 g,
                 b,
-                night_mode: true,
-                ..DisplaySettings::new()
+                warmth: 100,
+                dimness: 100,
+                ..DisplayProfile::neutral("t")
             }
             .effective();
 
-            assert!(night.g >= NIGHT_MODE_CHANNEL_FLOOR, "green floored");
-            assert!(night.b >= NIGHT_MODE_CHANNEL_FLOOR, "blue floored");
+            assert!(profile.g >= NIGHT_MODE_CHANNEL_FLOOR);
+            assert!(profile.b >= NIGHT_MODE_CHANNEL_FLOOR);
             assert!(
-                !(night.r < 15 && night.g < 15 && night.b < 15),
+                !(profile.r < 15 && profile.g < 15 && profile.b < 15),
                 "flatten would fire for base ({r}, {g}, {b})"
             );
-            assert!(night.g >= night.b, "green is never cut below blue");
         }
     }
 
     #[test]
-    fn strength_sliders_scale_the_effect() {
-        let base = DisplaySettings {
-            night_mode: true,
-            ..DisplaySettings::new()
-        };
-
-        // At 0 the sliders are a no-op even with night mode enabled
-        let off = DisplaySettings {
-            night_mode_warmth: 0,
-            night_mode_dimness: 0,
-            ..base.clone()
-        }
-        .effective();
-        assert_eq!(off.luminance, base.luminance);
-        assert_eq!((off.g, off.b), (base.g, base.b));
-
-        // At 100 it matches the tuned constants
-        let full = base.effective();
-        assert!(full.luminance < base.luminance);
-        assert!(full.b < full.g && full.g < full.r);
-
-        // Half strength sits between the two
-        let half = DisplaySettings {
-            night_mode_warmth: 50,
-            night_mode_dimness: 50,
-            ..base.clone()
-        }
-        .effective();
-        assert!(half.luminance > full.luminance && half.luminance < base.luminance);
-        assert!(half.b > full.b && half.b < base.b);
-
-        // The two are independent: dimness alone must not touch colour
-        let dim_only = DisplaySettings {
-            night_mode_warmth: 0,
-            night_mode_dimness: 100,
-            ..base.clone()
-        }
-        .effective();
-        assert_eq!((dim_only.g, dim_only.b), (base.g, base.b));
-        assert_eq!(dim_only.luminance, full.luminance);
-    }
-
-    #[test]
-    fn night_mode_round_trips_and_older_files_still_parse() {
+    fn sanitized_enforces_the_invariants() {
         let settings = DisplaySettings {
-            night_mode: true,
-            ..DisplaySettings::new()
-        };
-        let json = serde_json::to_string(&settings).unwrap();
+            active: 99,
+            profiles: vec![DisplayProfile {
+                name: "a very long profile name".to_owned(),
+                contrast: 0,
+                ..DisplayProfile::default()
+            }],
+        }
+        .sanitized();
+
+        assert_eq!(settings.profiles.len(), PROFILE_COUNT, "slots filled");
+        assert!(settings.active < PROFILE_COUNT, "active clamped");
         assert_eq!(
-            serde_json::from_str::<DisplaySettings>(&json).unwrap(),
-            settings
+            settings.profiles[0].name.chars().count(),
+            MAX_PROFILE_NAME_LEN
+        );
+        assert_eq!(
+            settings.profiles[0].contrast, MIN_CONTRAST,
+            "contrast raised to what the panel will accept"
         );
 
-        // A display.json written before night mode existed must still load, or `load` deletes it
-        // and resets every display setting.
+        // More profiles than slots are dropped, not kept
+        let many = DisplaySettings {
+            active: 0,
+            profiles: vec![DisplayProfile::default(); PROFILE_COUNT + 2],
+        }
+        .sanitized();
+        assert_eq!(many.profiles.len(), PROFILE_COUNT);
+    }
+
+    #[test]
+    fn a_flat_file_becomes_the_first_profile() {
+        // Written by the build before profiles existed. The tuned values must carry over, or
+        // upgrading would silently reset the panel.
         let legacy =
-            r#"{"luminance":40,"hue":50,"saturation":50,"contrast":50,"r":50,"g":50,"b":50}"#;
+            r#"{"luminance":40,"hue":50,"saturation":50,"contrast":50,"r":50,"g":30,"b":20}"#;
         let parsed: DisplaySettings = serde_json::from_str(legacy).unwrap();
-        assert_eq!(parsed.luminance, 40);
-        assert!(!parsed.night_mode);
-        // Missing strength fields must default to full, not to zero, or night mode would come
-        // back from an upgrade doing nothing at all
-        assert_eq!(parsed.night_mode_warmth, DEFAULT_NIGHT_MODE_STRENGTH);
-        assert_eq!(parsed.night_mode_dimness, DEFAULT_NIGHT_MODE_STRENGTH);
+        assert_eq!(parsed.active, 0);
+        assert_eq!(parsed.profiles.len(), PROFILE_COUNT);
+        assert_eq!(parsed.profiles[0].luminance, 40);
+        assert_eq!((parsed.profiles[0].g, parsed.profiles[0].b), (30, 20));
+
+        // The same file from the night-mode build: those keys are now unknown and must be
+        // ignored rather than rejected.
+        let with_night_mode = r#"{"luminance":40,"hue":50,"saturation":50,"contrast":50,
+            "r":50,"g":30,"b":20,"night_mode":true,"night_mode_warmth":80,
+            "night_mode_dimness":70}"#;
+        let parsed: DisplaySettings = serde_json::from_str(with_night_mode).unwrap();
+        assert_eq!(parsed.profiles[0].luminance, 40);
+        assert_eq!(parsed.names(), vec!["Day", "Night", "Custom"]);
+    }
+
+    #[test]
+    fn new_shape_round_trips() {
+        let mut settings = DisplaySettings::new();
+        settings.active = 2;
+        settings.active_mut().name = "Movies".to_owned();
+        settings.active_mut().saturation = 70;
+
+        let json = serde_json::to_string(&settings).unwrap();
+        let parsed: DisplaySettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, settings);
+        assert_eq!(parsed.active().name, "Movies");
     }
 }
