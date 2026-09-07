@@ -6,10 +6,12 @@ use anyhow::{Context, Result, anyhow, bail};
 use common::command::Command;
 use common::database::Database;
 use common::game_info::GameInfo;
+use common::performance;
+use common::power::PowerSettings;
 use serde::Deserialize;
 
 use common::constants::{ALLIUM_CONFIG_CONSOLES, ALLIUM_CONFIG_CORES, ALLIUM_RETROARCH};
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
 
 use crate::entry::game::Game;
 
@@ -211,7 +213,7 @@ impl ConsoleMapper {
             error!("Core \"{}\" does not exist.", core_name);
             return Ok(None);
         };
-        let game_info = match &core.core {
+        let mut game_info = match &core.core {
             CoreType::RetroArch(libretro_core) => GameInfo::new(
                 game.name.clone(),
                 game.path.clone(),
@@ -242,8 +244,23 @@ impl ConsoleMapper {
                 core.swap,
             ),
         };
+        // Resolve the game's performance mode against the global default and record it, so
+        // alliumd can re-apply it on resume without reopening the database.
+        game_info.performance_mode = database
+            .get_performance_mode(&game.path)
+            .unwrap_or_else(|err| {
+                warn!("could not read the performance mode: {err}");
+                None
+            })
+            .unwrap_or_else(|| PowerSettings::load().unwrap_or_default().performance_mode);
+
         debug!("Saving game info: {:?}", game_info);
         game_info.save()?;
+
+        // After the save, so a launch that fails here leaves the launcher running at the
+        // governor it already had
+        performance::apply(game_info.performance_mode);
+
         Ok(Some(Command::Exec(game_info.command())))
     }
 

@@ -8,6 +8,7 @@ use common::command::{Command, Value};
 use common::display::Display as DisplayTrait;
 use common::geom::{Alignment, Point, Rect};
 use common::locale::Locale;
+use common::performance::PerformanceMode;
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
 use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
 use common::resources::Resources;
@@ -38,6 +39,12 @@ pub struct Power {
 /// already says everything.
 fn description_key(row: usize, settings: &PowerSettings) -> Option<&'static str> {
     match row {
+        ROW_PERFORMANCE => Some(match settings.performance_mode {
+            PerformanceMode::System => "settings-power-desc-performance-system",
+            PerformanceMode::Battery => "settings-power-desc-performance-battery",
+            PerformanceMode::Balanced => "settings-power-desc-performance-balanced",
+            PerformanceMode::Performance => "settings-power-desc-performance-performance",
+        }),
         ROW_AUTO_SLEEP_CHARGING => Some(if settings.auto_sleep_when_charging {
             "settings-power-desc-auto-sleep-when-charging-on"
         } else {
@@ -76,12 +83,15 @@ fn power_action(row: usize, settings: &PowerSettings) -> PowerButtonAction {
     }
 }
 
-const ROW_AUTO_SLEEP_CHARGING: usize = 0;
-const ROW_AUTO_SLEEP_MINUTES: usize = 1;
-const ROW_CHARGING_BOOT: usize = 2;
-const ROW_VOLUME_ON_STARTUP: usize = 3;
-const ROW_POWER_BUTTON: usize = 4;
-const ROW_LID_CLOSE: usize = 5;
+// Performance goes first rather than last so every index stays fixed: the lid row is only built
+// on devices that have a lid, so anything appended after it would sit at a device-dependent row.
+const ROW_PERFORMANCE: usize = 0;
+const ROW_AUTO_SLEEP_CHARGING: usize = 1;
+const ROW_AUTO_SLEEP_MINUTES: usize = 2;
+const ROW_CHARGING_BOOT: usize = 3;
+const ROW_VOLUME_ON_STARTUP: usize = 4;
+const ROW_POWER_BUTTON: usize = 5;
+const ROW_LID_CLOSE: usize = 6;
 
 /// Powering off is hidden where `shutdown` can only reboot, which would make plugging in a
 /// charger loop the device through boot forever.
@@ -141,7 +151,7 @@ impl Power {
         let button_hints_rect = button_hints.bounding_box(&styles);
         let row_pitch =
             styles.ui.ui_font.size + styles.ui.padding_y as u32 + styles.ui.list_margin as u32;
-        let rows = if DefaultPlatform::has_lid() { 6 } else { 5 };
+        let rows = if DefaultPlatform::has_lid() { 7 } else { 6 };
         // Take the description's strip out of the list, but never so much that SettingsList's
         // visible_count drops a row and starts scrolling
         let available = (button_hints_rect.y - y) as u32;
@@ -157,6 +167,20 @@ impl Power {
         );
 
         let mut buttons: Vec<(String, Box<dyn View>)> = vec![
+            (
+                locale.t("settings-power-performance-mode"),
+                Box::new(Select::new(
+                    Point::zero(),
+                    power_settings.performance_mode as usize,
+                    vec![
+                        locale.t("settings-power-performance-mode-system"),
+                        locale.t("settings-power-performance-mode-battery"),
+                        locale.t("settings-power-performance-mode-balanced"),
+                        locale.t("settings-power-performance-mode-performance"),
+                    ],
+                    Alignment::Right,
+                )),
+            ),
             (
                 locale.t("settings-power-auto-sleep-when-charging"),
                 Box::new(Toggle::new(
@@ -286,6 +310,11 @@ impl Power {
 impl Power {
     fn apply_value(&mut self, row: usize, val: Value) {
         match row {
+            ROW_PERFORMANCE => {
+                self.power_settings.performance_mode =
+                    PerformanceMode::from_repr(val.as_int().unwrap_or(0) as usize)
+                        .unwrap_or_default()
+            }
             ROW_AUTO_SLEEP_CHARGING => {
                 self.power_settings.auto_sleep_when_charging = val.as_bool().unwrap_or(true)
             }
@@ -390,7 +419,11 @@ impl View for Power {
                     Command::ValueChanged(i, val) => {
                         self.apply_value(i, val);
                         self.power_settings.save()?;
-                        toast_needs_restart_for_effect(&self.res, &commands).await?;
+                        // The performance default is read at each game launch, so it needs no
+                        // restart -- unlike the rows alliumd only reads once at startup.
+                        if i != ROW_PERFORMANCE {
+                            toast_needs_restart_for_effect(&self.res, &commands).await?;
+                        }
                     }
                     _ => {}
                 }

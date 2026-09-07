@@ -5,11 +5,12 @@ use std::{
 
 use anyhow::{Context, Result};
 use chrono::{Duration, NaiveDate};
-use log::{info, trace};
+use log::{info, trace, warn};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use rusqlite_migration::{M, Migrations};
 
 use crate::constants::{ALLIUM_BASE_DIR, ALLIUM_DATABASE};
+use crate::performance::PerformanceMode;
 
 #[derive(Debug, Clone, Default)]
 pub struct Database {
@@ -175,6 +176,13 @@ CREATE TABLE IF NOT EXISTS game_sessions (
     FOREIGN KEY (game_path) REFERENCES games(path)
 );
 CREATE INDEX IF NOT EXISTS idx_game_sessions_start_time ON game_sessions(start_time DESC);
+"),
+        // Nullable on purpose: NULL means "follow the global default", the same way `core` means
+        // "follow the console default". Read and written only by get/set_performance_mode, so it
+        // deliberately stays out of `Game`, `NewGame` and `map_game` -- and therefore out of the
+        // eleven hand-written SELECT column lists, where a missed column silently empties a view.
+        M::up("
+ALTER TABLE games ADD COLUMN performance_mode INTEGER;
 "),
                 ])
     }
@@ -668,6 +676,51 @@ ON CONFLICT(path) DO UPDATE SET play_count = play_count + 1;",
             "UPDATE games SET core = ? WHERE path = ?",
             params![core, path.display().to_string()],
         )?;
+
+        Ok(())
+    }
+
+    /// The performance mode saved for a game, or `None` to follow the global default.
+    pub fn get_performance_mode(&self, path: &Path) -> Result<Option<PerformanceMode>> {
+        let mode = self
+            .conn
+            .as_ref()
+            .unwrap()
+            .query_row(
+                "SELECT performance_mode FROM games WHERE path = ?",
+                [path.display().to_string()],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()?
+            .flatten();
+
+        // A value no variant matches means a newer build wrote it, or the column was edited by
+        // hand. Falling back to the global default is better than guessing, and much better than
+        // the `.unwrap()` `map_game` uses for `genres`.
+        Ok(mode.and_then(|repr| {
+            usize::try_from(repr)
+                .ok()
+                .and_then(PerformanceMode::from_repr)
+        }))
+    }
+
+    /// Saves a game's performance mode, or clears it back to the global default with `None`.
+    ///
+    /// A bare UPDATE like `set_core`, because the only caller is the in-game menu and a running
+    /// game always has a row -- `increment_play_count` created it at launch. Logged rather than
+    /// silently discarded if that ever stops being true.
+    pub fn set_performance_mode(&self, path: &Path, mode: Option<PerformanceMode>) -> Result<()> {
+        let rows = self.conn.as_ref().unwrap().execute(
+            "UPDATE games SET performance_mode = ? WHERE path = ?",
+            params![mode.map(|mode| mode as i64), path.display().to_string()],
+        )?;
+
+        if rows == 0 {
+            warn!(
+                "no game row for {}, performance mode was not saved",
+                path.display()
+            );
+        }
 
         Ok(())
     }
@@ -1177,6 +1230,54 @@ mod tests {
 
         let core = db.get_core(&games[0].path)?;
         assert_eq!(core, Some("CORE".to_owned()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_set_performance_mode() -> Result<()> {
+        let db = Database::in_memory().unwrap();
+
+        let games = vec![NewGame {
+            name: "Game One".to_owned(),
+            path: PathBuf::from("test_directory/Game One.rom"),
+            image: None,
+            core: None,
+            rating: None,
+            release_date: None,
+            developer: None,
+            publisher: None,
+            genres: Vec::new(),
+            favorite: false,
+        }];
+
+        db.update_games(&games).unwrap();
+
+        // Unset, so the game follows whatever the global default is
+        assert_eq!(db.get_performance_mode(&games[0].path)?, None);
+
+        db.set_performance_mode(&games[0].path, Some(PerformanceMode::Performance))?;
+        assert_eq!(
+            db.get_performance_mode(&games[0].path)?,
+            Some(PerformanceMode::Performance)
+        );
+
+        // Battery is discriminant 1, so this also catches a mode stored as a truthy flag
+        db.set_performance_mode(&games[0].path, Some(PerformanceMode::Battery))?;
+        assert_eq!(
+            db.get_performance_mode(&games[0].path)?,
+            Some(PerformanceMode::Battery)
+        );
+
+        // Back to following the global default
+        db.set_performance_mode(&games[0].path, None)?;
+        assert_eq!(db.get_performance_mode(&games[0].path)?, None);
+
+        // A game the scan has never seen reads as unset rather than erroring
+        assert_eq!(
+            db.get_performance_mode(Path::new("test_directory/Missing.rom"))?,
+            None
+        );
 
         Ok(())
     }

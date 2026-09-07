@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use strum::FromRepr;
 
 use crate::constants::ALLIUM_POWER_SETTINGS;
+use crate::performance::PerformanceMode;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PowerSettings {
@@ -17,6 +18,9 @@ pub struct PowerSettings {
     pub volume_on_startup: VolumeOnStartup,
     #[serde(default)]
     pub charging_boot_action: ChargingBootAction,
+    /// The performance mode used by games that have not been given one of their own.
+    #[serde(default)]
+    pub performance_mode: PerformanceMode,
 }
 
 /// What happens when the device powers on only because a charger was plugged in.
@@ -69,6 +73,9 @@ impl Default for PowerSettings {
             auto_sleep_duration_minutes: 5,
             volume_on_startup: VolumeOnStartup::Restore,
             charging_boot_action: ChargingBootAction::ChargeScreen,
+            // Leaves the CPU governor exactly as it was, so this build changes nothing about how
+            // the device clocks until the setting is actually used
+            performance_mode: PerformanceMode::System,
         }
     }
 }
@@ -120,6 +127,8 @@ mod tests {
             parsed.charging_boot_action,
             ChargingBootAction::ChargeScreen
         );
+        // Nothing touches the CPU governor until this is set deliberately
+        assert_eq!(parsed.performance_mode, PerformanceMode::System);
     }
 
     #[test]
