@@ -47,13 +47,14 @@ impl Plate {
         let plate_w = padding_x + icon_side + padding_x + bar_w + padding_x;
         let plate_h = font_size + padding_y * 2;
 
-        // Clear the button hint row, positioned by ButtonHints::ensure_layout
-        let hint_h = styles.button_size().max(styles.button_hint_font_size()) as u32;
-        let bottom_margin = padding_x + hint_h + padding_y;
-
+        // Centred vertically, and that placement is load-bearing rather than cosmetic. The panel
+        // is mounted upside down -- `fb_y = height - 1 - y` in the framebuffer -- so the bottom of
+        // the logical screen is the *first* thing scanned out each frame. A plate down there has
+        // only ~1.7ms after a game overwrites it before the panel reads it, which is not enough to
+        // reliably repaint. The middle of the screen is scanned ~8.4ms in.
         let rect = Rect::new(
             (display.width() as i32 - plate_w as i32) / 2,
-            display.height() as i32 - (plate_h + bottom_margin) as i32,
+            (display.height() as i32 - plate_h as i32) / 2,
             plate_w,
             plate_h,
         );

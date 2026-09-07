@@ -1,6 +1,7 @@
+use std::os::fd::AsRawFd;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 use framebuffer::Framebuffer;
@@ -11,8 +12,29 @@ use crate::display::color::Color;
 use crate::display::{Display, HeldPixels, RectHold};
 use crate::geom::Rect;
 
-/// How often the stamper checks whether the app has flipped pages
+/// How often the stamper checks whether the app has flipped pages, when it cannot wait on vblank
 const STAMP_POLL: Duration = Duration::from_millis(1);
+/// Repaint at least this often even if nothing appears to have changed. The app may composite into
+/// the visible page without ever moving `yoffset`, in which case a flip is never observed and the
+/// plate would be overwritten for good.
+const STAMP_FLOOR: Duration = Duration::from_millis(8);
+
+// The standard fbdev vblank wait. It is not in the vendor's mstarFb.h, whose custom range starts
+// at 'F' 0x60, so support is unknown until probed -- but the patched RetroArch exposes a working
+// VSync option, which suggests the driver implements it. Waiting on the panel rather than polling
+// the app is the only trigger that is correct whether or not the app pans.
+nix::ioctl_write_ptr_bad!(
+    fb_wait_for_vsync,
+    nix::request_code_write!(b'F', 0x20, 4),
+    u32
+);
+
+/// Blocks until the next vblank. `Err` means the driver has no such ioctl.
+fn wait_for_vsync(fd: std::os::fd::RawFd) -> nix::Result<()> {
+    let zero: u32 = 0;
+    // SAFETY: the driver reads a single u32 by pointer; `zero` outlives the call
+    unsafe { fb_wait_for_vsync(fd, &zero) }.map(|_| ())
+}
 
 pub struct FramebufferDisplay {
     pixmap: Pixmap,
@@ -100,6 +122,8 @@ impl FramebufferDisplay {
             .min((x1 - x0) / 2)
             .min((y1 - y0) / 2) as f32;
         let row_h = (y1 - y0) as f32;
+        // Rows are addressed by the hardware stride so a padded scanline can't skew them
+        let stride = self.iface.fix_screen_info.line_length as usize;
         let mut rows = Vec::with_capacity(y1 - y0);
         let mut bytes = Vec::with_capacity((y1 - y0) * (x1 - x0) * bytes_per_pixel);
         for y in y0..y1 {
@@ -119,7 +143,7 @@ impl FramebufferDisplay {
             let fb_y = height - 1 - y;
             let fb_x0 = width - rx1;
             rows.push(StampRow {
-                offset: (fb_y * width + fb_x0) * bytes_per_pixel,
+                offset: fb_y * stride + fb_x0 * bytes_per_pixel,
                 start,
                 len: bytes.len() - start,
             });
@@ -144,7 +168,7 @@ impl FramebufferDisplay {
             bytes: Arc::new(Mutex::new(bytes.into_boxed_slice())),
             rows: rows.into_boxed_slice(),
             pages,
-            page_stride: width * height * bytes_per_pixel,
+            page_stride: stride * height,
         })
     }
 
@@ -305,31 +329,81 @@ impl Display for FramebufferDisplay {
             return Ok(None);
         };
 
+        // Open the device before committing to a hold. Doing it inside the thread meant a failure
+        // there left the caller believing a stamper was running, so it never fell back to
+        // flushing the plate itself and nothing was ever drawn.
+        let mut iface = match Framebuffer::new("/dev/fb0") {
+            Ok(iface) => iface,
+            Err(e) => {
+                warn!("cannot open /dev/fb0 to stamp: {}", e);
+                return Ok(None);
+            }
+        };
+
+        // Waiting on vblank is the only trigger that is right whether or not the app pans, so
+        // prefer it and fall back to polling only if the driver has no such ioctl.
+        let vsync = wait_for_vsync(iface.device.as_raw_fd()).is_ok();
+        debug!(
+            "stamping with {}",
+            if vsync {
+                "vblank waits"
+            } else {
+                "page polling"
+            }
+        );
+
         // The hold keeps a handle on the same buffer the thread reads, so later content changes
         // go through `refresh_rect_hold` instead of stopping this thread and starting another
         let pixels = Arc::clone(&stamp.bytes);
         Ok(Some(RectHold::spawn(pixels, move |stop| {
-            let Ok(mut iface) = Framebuffer::new("/dev/fb0") else {
-                return;
-            };
-
             // Paint every page up front so the plate is present whichever one the app shows next
             stamp.blit(&mut iface.frame);
 
-            // Then follow the app's page flips rather than blitting blind. A flip is the only
-            // moment the plate can be lost -- the app has just overwritten the page it panned to
-            // -- and repainting immediately gets the plate back well before the panel scans that
-            // far down. Polling one ioctl is far cheaper than the ~134KiB of write-combining
-            // memcpy a blind pass costs, which was consuming most of a core on a dual-core SoC.
+            let fd = iface.device.as_raw_fd();
             let mut last_yoffset = iface.var_screen_info.yoffset;
+            let mut logged_poll_error = false;
+            let mut last_blit = Instant::now();
+
             while !stop.load(Ordering::Relaxed) {
-                std::thread::sleep(STAMP_POLL);
-                let Ok(var) = Framebuffer::get_var_screeninfo(&iface.device) else {
-                    continue;
-                };
-                if var.yoffset != last_yoffset {
-                    last_yoffset = var.yoffset;
+                if vsync {
+                    // Blocks in the kernel, so this costs nothing until the panel is ready. The
+                    // blit then lands early in the frame, well before the plate is scanned out.
+                    if wait_for_vsync(fd).is_err() {
+                        std::thread::sleep(STAMP_POLL);
+                    }
                     stamp.blit(&mut iface.frame);
+                    continue;
+                }
+
+                std::thread::sleep(STAMP_POLL);
+                match Framebuffer::get_var_screeninfo(&iface.device) {
+                    Ok(var) if var.yoffset != last_yoffset => {
+                        last_yoffset = var.yoffset;
+                        stamp.blit(&mut iface.frame);
+                        last_blit = Instant::now();
+                    }
+                    Ok(_) => {
+                        // An app that composites into the visible page never moves yoffset, so a
+                        // flip is never seen. Repaint on a floor regardless or the plate is lost.
+                        if last_blit.elapsed() >= STAMP_FLOOR {
+                            stamp.blit(&mut iface.frame);
+                            last_blit = Instant::now();
+                        }
+                    }
+                    Err(e) => {
+                        // Silently ignoring this looks exactly like the plate never being drawn
+                        if !logged_poll_error {
+                            logged_poll_error = true;
+                            warn!(
+                                "cannot read fb page offset, stamping on a timer only: {}",
+                                e
+                            );
+                        }
+                        if last_blit.elapsed() >= STAMP_FLOOR {
+                            stamp.blit(&mut iface.frame);
+                            last_blit = Instant::now();
+                        }
+                    }
                 }
             }
         })))
