@@ -59,23 +59,29 @@ where
     _phantom_battery: PhantomData<B>,
 }
 
-/// The per-game options, in the order Left and Right move through them.
-const PERFORMANCE_MODES: [Option<PerformanceMode>; 4] = [
+/// The per-game options, slowest first, in the order Left and Right move through them.
+///
+/// `System` is deliberately absent: "leave the CPU alone" is what the global default is for, and
+/// `None` here means "follow it". Short names only -- the row title takes two thirds of the width,
+/// so the frequencies shown in Settings would not fit beside it.
+const PERFORMANCE_MODES: [Option<PerformanceMode>; 6] = [
     None,
-    Some(PerformanceMode::Battery),
-    Some(PerformanceMode::Balanced),
-    Some(PerformanceMode::Performance),
+    Some(PerformanceMode::Powersave),
+    Some(PerformanceMode::Low),
+    Some(PerformanceMode::Medium),
+    Some(PerformanceMode::High),
+    Some(PerformanceMode::Max),
 ];
 
 /// Locale key naming a per-game performance mode.
 fn performance_mode_key(mode: Option<PerformanceMode>) -> &'static str {
     match mode {
-        // `System` is not offered per game -- "leave the governor alone" is what the global
-        // default is for -- so a stored one reads back as following that default
         None | Some(PerformanceMode::System) => "ingame-menu-performance-default",
-        Some(PerformanceMode::Battery) => "ingame-menu-performance-battery",
-        Some(PerformanceMode::Balanced) => "ingame-menu-performance-balanced",
-        Some(PerformanceMode::Performance) => "ingame-menu-performance-performance",
+        Some(PerformanceMode::Powersave) => "ingame-menu-performance-powersave",
+        Some(PerformanceMode::Low) => "ingame-menu-performance-low",
+        Some(PerformanceMode::Medium) => "ingame-menu-performance-medium",
+        Some(PerformanceMode::High) => "ingame-menu-performance-high",
+        Some(PerformanceMode::Max) => "ingame-menu-performance-max",
     }
 }
 

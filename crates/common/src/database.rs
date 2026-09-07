@@ -1256,17 +1256,25 @@ mod tests {
         // Unset, so the game follows whatever the global default is
         assert_eq!(db.get_performance_mode(&games[0].path)?, None);
 
-        db.set_performance_mode(&games[0].path, Some(PerformanceMode::Performance))?;
+        db.set_performance_mode(&games[0].path, Some(PerformanceMode::Max))?;
         assert_eq!(
             db.get_performance_mode(&games[0].path)?,
-            Some(PerformanceMode::Performance)
+            Some(PerformanceMode::Max)
         );
 
-        // Battery is discriminant 1, so this also catches a mode stored as a truthy flag
-        db.set_performance_mode(&games[0].path, Some(PerformanceMode::Battery))?;
+        // Powersave is discriminant 1, so this also catches a mode stored as a truthy flag
+        db.set_performance_mode(&games[0].path, Some(PerformanceMode::Powersave))?;
         assert_eq!(
             db.get_performance_mode(&games[0].path)?,
-            Some(PerformanceMode::Battery)
+            Some(PerformanceMode::Powersave)
+        );
+
+        // A tier appended after the first version of this feature, so its discriminant is above
+        // the ones the original four used
+        db.set_performance_mode(&games[0].path, Some(PerformanceMode::Medium))?;
+        assert_eq!(
+            db.get_performance_mode(&games[0].path)?,
+            Some(PerformanceMode::Medium)
         );
 
         // Back to following the global default

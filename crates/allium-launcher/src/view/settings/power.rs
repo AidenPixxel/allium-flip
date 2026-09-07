@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -8,7 +8,7 @@ use common::command::{Command, Value};
 use common::display::Display as DisplayTrait;
 use common::geom::{Alignment, Point, Rect};
 use common::locale::Locale;
-use common::performance::PerformanceMode;
+use common::performance::{self, DISPLAY_ORDER, PerformanceMode};
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
 use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
 use common::resources::Resources;
@@ -35,16 +35,80 @@ pub struct Power {
     button_hints: ButtonHints<String>,
 }
 
+/// Locale key naming a performance preset.
+fn performance_mode_key(mode: PerformanceMode) -> &'static str {
+    match mode {
+        PerformanceMode::System => "settings-power-performance-mode-system",
+        PerformanceMode::Powersave => "settings-power-performance-mode-powersave",
+        PerformanceMode::Low => "settings-power-performance-mode-low",
+        PerformanceMode::Medium => "settings-power-performance-mode-medium",
+        PerformanceMode::High => "settings-power-performance-mode-high",
+        PerformanceMode::Max => "settings-power-performance-mode-max",
+    }
+}
+
+/// The preset's name, carrying the frequency it resolves to on this device where there is one
+/// worth showing.
+///
+/// Composed through a locale key rather than `format!` so the wording stays with the translators,
+/// and kept short -- `Select` builds its label with no width limit
+/// (`view::input::select::Select::new`) while the row title beside it is truncated at two thirds
+/// of the row, so a long value here runs into the title.
+fn performance_mode_label(mode: PerformanceMode, locale: &Locale) -> String {
+    let name = locale.t(performance_mode_key(mode));
+    match performance::ceiling_mhz(mode) {
+        Some(mhz) => {
+            let mut args = HashMap::new();
+            args.insert("name".into(), name.into());
+            args.insert("mhz".into(), (mhz as i32).into());
+            locale.ta("settings-power-performance-mode-capped", &args)
+        }
+        None => name,
+    }
+}
+
+/// Describes the highlighted row's current option.
+fn description_text(row: usize, settings: &PowerSettings, locale: &Locale) -> String {
+    if row == ROW_PERFORMANCE {
+        return performance_description(settings.performance_mode, locale);
+    }
+
+    description_key(row, settings)
+        .map(|key| locale.t(key))
+        .unwrap_or_default()
+}
+
+/// The capped tiers name the frequency they stop at, which is only known once the driver has been
+/// read, so they take an argument -- and need a wording of their own for a device that publishes
+/// no frequencies, since Fluent would otherwise render the placeholder name.
+fn performance_description(mode: PerformanceMode, locale: &Locale) -> String {
+    let key = match mode {
+        PerformanceMode::System => "settings-power-desc-performance-system",
+        PerformanceMode::Powersave => "settings-power-desc-performance-powersave",
+        PerformanceMode::Low => "settings-power-desc-performance-low",
+        PerformanceMode::Medium => "settings-power-desc-performance-medium",
+        PerformanceMode::High => "settings-power-desc-performance-high",
+        PerformanceMode::Max => "settings-power-desc-performance-max",
+    };
+
+    match mode {
+        PerformanceMode::Low | PerformanceMode::Medium => match performance::ceiling_mhz(mode) {
+            Some(mhz) => {
+                let mut args = HashMap::new();
+                args.insert("mhz".into(), (mhz as i32).into());
+                locale.ta(key, &args)
+            }
+            None => locale.t(&format!("{key}-unknown")),
+        },
+        _ => locale.t(key),
+    }
+}
+
 /// Locale key describing the option currently chosen for `row`, or `None` for rows whose label
-/// already says everything.
+/// already says everything. The performance row is handled by [`performance_description`], which
+/// needs an argument this signature cannot carry.
 fn description_key(row: usize, settings: &PowerSettings) -> Option<&'static str> {
     match row {
-        ROW_PERFORMANCE => Some(match settings.performance_mode {
-            PerformanceMode::System => "settings-power-desc-performance-system",
-            PerformanceMode::Battery => "settings-power-desc-performance-battery",
-            PerformanceMode::Balanced => "settings-power-desc-performance-balanced",
-            PerformanceMode::Performance => "settings-power-desc-performance-performance",
-        }),
         ROW_AUTO_SLEEP_CHARGING => Some(if settings.auto_sleep_when_charging {
             "settings-power-desc-auto-sleep-when-charging-on"
         } else {
@@ -171,13 +235,17 @@ impl Power {
                 locale.t("settings-power-performance-mode"),
                 Box::new(Select::new(
                     Point::zero(),
-                    power_settings.performance_mode as usize,
-                    vec![
-                        locale.t("settings-power-performance-mode-system"),
-                        locale.t("settings-power-performance-mode-battery"),
-                        locale.t("settings-power-performance-mode-balanced"),
-                        locale.t("settings-power-performance-mode-performance"),
-                    ],
+                    // Indexed through DISPLAY_ORDER rather than the discriminant: the presets are
+                    // stored on disk by discriminant and so can only be appended to, which is not
+                    // the order they should be walked in.
+                    DISPLAY_ORDER
+                        .iter()
+                        .position(|mode| *mode == power_settings.performance_mode)
+                        .unwrap_or_default(),
+                    DISPLAY_ORDER
+                        .iter()
+                        .map(|mode| performance_mode_label(*mode, &locale))
+                        .collect(),
                     Alignment::Right,
                 )),
             ),
@@ -281,12 +349,9 @@ impl Power {
             list.select(state.selected);
         }
 
-        let description_text = description_key(list.selected(), &power_settings)
-            .map(|key| locale.t(key))
-            .unwrap_or_default();
         let description = Label::new(
             Point::new(description_rect.x, description_rect.y),
-            description_text,
+            description_text(list.selected(), &power_settings, &locale),
             Alignment::Left,
             None,
         );
@@ -311,9 +376,11 @@ impl Power {
     fn apply_value(&mut self, row: usize, val: Value) {
         match row {
             ROW_PERFORMANCE => {
-                self.power_settings.performance_mode =
-                    PerformanceMode::from_repr(val.as_int().unwrap_or(0) as usize)
-                        .unwrap_or_default()
+                // Index through the display order, not the discriminant
+                self.power_settings.performance_mode = DISPLAY_ORDER
+                    .get(val.as_int().unwrap_or(0).max(0) as usize)
+                    .copied()
+                    .unwrap_or_default()
             }
             ROW_AUTO_SLEEP_CHARGING => {
                 self.power_settings.auto_sleep_when_charging = val.as_bool().unwrap_or(true)
@@ -350,9 +417,11 @@ impl Power {
     }
 
     fn refresh_description(&mut self) {
-        let text = description_key(self.list.selected(), &self.power_settings)
-            .map(|key| self.res.get::<Locale>().t(key))
-            .unwrap_or_default();
+        let text = description_text(
+            self.list.selected(),
+            &self.power_settings,
+            &self.res.get::<Locale>(),
+        );
         self.description.set_text(text);
     }
 }
