@@ -21,6 +21,13 @@ pub struct PowerSettings {
     /// The performance mode used by games that have not been given one of their own.
     #[serde(default)]
     pub performance_mode: PerformanceMode,
+    /// How long the device stays suspended before powering off. Zero never powers off.
+    ///
+    /// A named default rather than `#[serde(default)]`, which would yield zero: every existing
+    /// power.json would then read as Never and silently lose the shutdown that used to happen
+    /// after five minutes.
+    #[serde(default = "PowerSettings::default_suspend_shutdown_minutes")]
+    pub suspend_shutdown_minutes: i32,
 }
 
 /// What happens when the device powers on only because a charger was plugged in.
@@ -76,6 +83,7 @@ impl Default for PowerSettings {
             // Leaves the CPU governor exactly as it was, so this build changes nothing about how
             // the device clocks until the setting is actually used
             performance_mode: PerformanceMode::System,
+            suspend_shutdown_minutes: PowerSettings::default_suspend_shutdown_minutes(),
         }
     }
 }
@@ -83,6 +91,11 @@ impl Default for PowerSettings {
 impl PowerSettings {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    /// What the suspend timeout used to be hardcoded to, so upgrading changes nothing.
+    fn default_suspend_shutdown_minutes() -> i32 {
+        5
     }
 
     pub fn load() -> Result<Self> {
@@ -129,6 +142,9 @@ mod tests {
         );
         // Nothing touches the CPU governor until this is set deliberately
         assert_eq!(parsed.performance_mode, PerformanceMode::System);
+        // Five, not zero: zero means Never, which would quietly take away the shutdown that this
+        // file's device has been doing after five minutes all along
+        assert_eq!(parsed.suspend_shutdown_minutes, 5);
     }
 
     #[test]

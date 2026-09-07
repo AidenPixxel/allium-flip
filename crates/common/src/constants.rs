@@ -121,9 +121,6 @@ pub const CLOCK_UPDATE_INTERVAL: Duration = Duration::from_secs(60);
 /// The UI frame period; a launcher redraw flushes the whole screen.
 pub const UI_FRAME_INTERVAL: Duration = Duration::from_micros(166_667);
 
-/// How long to wait until the device is considered idle.
-pub const IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-
 /// The number of items to jump when pressing left/right in a listing.
 pub const LISTING_JUMP_SIZE: i32 = 5;
 

@@ -73,9 +73,42 @@ fn description_text(row: usize, settings: &PowerSettings, locale: &Locale) -> St
         return performance_description(settings.performance_mode, locale);
     }
 
+    if row == ROW_SUSPEND_SHUTDOWN {
+        return minutes_description(
+            "settings-power-desc-shutdown-after",
+            settings.suspend_shutdown_minutes,
+            locale,
+        );
+    }
+
+    // Suspend has always powered the device off after a while without saying so. Now that the delay
+    // is a setting, the description names it -- which `description_key` cannot do, since it hands
+    // back a key with nothing to fill the placeholder.
+    if (row == ROW_POWER_BUTTON || row == ROW_LID_CLOSE)
+        && matches!(power_action(row, settings), PowerButtonAction::Suspend)
+    {
+        return minutes_description(
+            "settings-power-desc-action-suspend",
+            settings.suspend_shutdown_minutes,
+            locale,
+        );
+    }
+
     description_key(row, settings)
         .map(|key| locale.t(key))
         .unwrap_or_default()
+}
+
+/// Renders a description naming a minute count, falling back to a `-never` wording at zero --
+/// Fluent would otherwise render the placeholder itself.
+fn minutes_description(key: &str, minutes: i32, locale: &Locale) -> String {
+    if minutes <= 0 {
+        return locale.t(&format!("{key}-never"));
+    }
+
+    let mut args = HashMap::new();
+    args.insert("minutes".into(), minutes.into());
+    locale.ta(key, &args)
 }
 
 /// The capped tiers name the frequency they stop at, which is only known once the driver has been
@@ -130,11 +163,12 @@ fn description_key(row: usize, settings: &PowerSettings) -> Option<&'static str>
             VolumeOnStartup::Restore => "settings-power-desc-volume-on-startup-restore",
             VolumeOnStartup::Muted => "settings-power-desc-volume-on-startup-muted",
         }),
-        ROW_POWER_BUTTON | ROW_LID_CLOSE => Some(match power_action(row, settings) {
-            PowerButtonAction::Suspend => "settings-power-desc-action-suspend",
-            PowerButtonAction::Shutdown => "settings-power-desc-action-shutdown",
-            PowerButtonAction::Nothing => "settings-power-desc-action-nothing",
-        }),
+        ROW_POWER_BUTTON | ROW_LID_CLOSE => match power_action(row, settings) {
+            // Handled in `description_text`, which can pass it the delay
+            PowerButtonAction::Suspend => None,
+            PowerButtonAction::Shutdown => Some("settings-power-desc-action-shutdown"),
+            PowerButtonAction::Nothing => Some("settings-power-desc-action-nothing"),
+        },
         _ => None,
     }
 }
@@ -152,10 +186,11 @@ fn power_action(row: usize, settings: &PowerSettings) -> PowerButtonAction {
 const ROW_PERFORMANCE: usize = 0;
 const ROW_AUTO_SLEEP_CHARGING: usize = 1;
 const ROW_AUTO_SLEEP_MINUTES: usize = 2;
-const ROW_CHARGING_BOOT: usize = 3;
-const ROW_VOLUME_ON_STARTUP: usize = 4;
-const ROW_POWER_BUTTON: usize = 5;
-const ROW_LID_CLOSE: usize = 6;
+const ROW_SUSPEND_SHUTDOWN: usize = 3;
+const ROW_CHARGING_BOOT: usize = 4;
+const ROW_VOLUME_ON_STARTUP: usize = 5;
+const ROW_POWER_BUTTON: usize = 6;
+const ROW_LID_CLOSE: usize = 7;
 
 /// Powering off is hidden where `shutdown` can only reboot, which would make plugging in a
 /// charger loop the device through boot forever.
@@ -188,6 +223,7 @@ impl Power {
 
         let auto_sleep_duration_disabled_label =
             locale.t("settings-power-auto-sleep-duration-disabled");
+        let shutdown_after_never_label = locale.t("settings-power-shutdown-after-never");
 
         let charging_boot_actions = charging_boot_actions();
 
@@ -213,16 +249,13 @@ impl Power {
         );
 
         let button_hints_rect = button_hints.bounding_box(&styles);
-        let row_pitch =
-            styles.ui.ui_font.size + styles.ui.padding_y as u32 + styles.ui.list_margin as u32;
-        let rows = if DefaultPlatform::has_lid() { 7 } else { 6 };
-        // Take the description's strip out of the list, but never so much that SettingsList's
-        // visible_count drops a row and starts scrolling
+        // Take the description's strip out of the list and let SettingsList scroll for whatever no
+        // longer fits. This used to be grown back with `.max(rows * row_pitch)` so the rows would
+        // never scroll, which worked while there were seven of them and fit exactly; at eight it
+        // pushed the description down into the button hints instead.
         let available = (button_hints_rect.y - y) as u32;
         let description_height = styles.ui.ui_font.size + styles.ui.padding_y as u32;
-        let list_height = available
-            .saturating_sub(description_height + styles.ui.margin_y as u32)
-            .max((rows * row_pitch).min(available));
+        let list_height = available.saturating_sub(description_height + styles.ui.margin_y as u32);
         let description_rect = Rect::new(
             x + styles.ui.margin_x,
             y + list_height as i32,
@@ -268,6 +301,24 @@ impl Power {
                     move |x: &i32| {
                         if *x == 0 {
                             auto_sleep_duration_disabled_label.clone()
+                        } else {
+                            x.to_string()
+                        }
+                    },
+                    Alignment::Right,
+                )),
+            ),
+            (
+                locale.t("settings-power-shutdown-after"),
+                Box::new(Number::new(
+                    Point::zero(),
+                    power_settings.suspend_shutdown_minutes,
+                    0,
+                    120,
+                    5,
+                    move |x: &i32| {
+                        if *x == 0 {
+                            shutdown_after_never_label.clone()
                         } else {
                             x.to_string()
                         }
@@ -387,6 +438,9 @@ impl Power {
             }
             ROW_AUTO_SLEEP_MINUTES => {
                 self.power_settings.auto_sleep_duration_minutes = val.as_int().unwrap_or(5)
+            }
+            ROW_SUSPEND_SHUTDOWN => {
+                self.power_settings.suspend_shutdown_minutes = val.as_int().unwrap_or(5)
             }
             ROW_CHARGING_BOOT => {
                 // The option list is device-dependent, so index through it rather than

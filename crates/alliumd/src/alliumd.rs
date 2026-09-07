@@ -12,7 +12,7 @@ use common::battery::Battery;
 use common::constants::{
     ALLIUM_GAME_INFO, ALLIUM_LAUNCHER, ALLIUM_SD_ROOT, ALLIUM_VERSION, ALLIUMD_STATE,
     BATTERY_SHUTDOWN_THRESHOLD, BATTERY_UPDATE_INTERVAL, BATTERY_WARNING_THRESHOLD,
-    CHARGE_POWER_OFF_GRACE, IDLE_TIMEOUT, MAX_BRIGHTNESS, MAX_VOLUME,
+    CHARGE_POWER_OFF_GRACE, MAX_BRIGHTNESS, MAX_VOLUME,
 };
 use common::display::settings::DisplaySettings;
 use common::locale::{Locale, LocaleSettings};
@@ -658,6 +658,18 @@ impl AlliumD<DefaultPlatform> {
         let ctx = self.platform.suspend()?;
         signal(&self.main, Signal::SIGSTOP)?;
 
+        // A fixed point in time rather than a fresh sleep per pass: the loop re-enters on every key
+        // event it discards, so a countdown built inside it restarts on any stray press -- hardly
+        // visible at five minutes, very visible at ninety. Anything at or below zero means Never;
+        // clamping a negative to zero would instead shut a hand-edited device down on the spot.
+        let deadline = match self.power_settings.suspend_shutdown_minutes {
+            minutes if minutes <= 0 => None,
+            minutes => {
+                Some(tokio::time::Instant::now() + std::time::Duration::new(minutes as u64 * 60, 0))
+            }
+        };
+        let mut battery = self.platform.battery()?;
+
         loop {
             tokio::select! {
                 key_event = self.platform.poll()=> {
@@ -667,12 +679,20 @@ impl AlliumD<DefaultPlatform> {
                         break;
                     }
                 }
-                _ = tokio::time::sleep(IDLE_TIMEOUT) => {
-                    info!("idle timeout, shutting down");
-                    signal(&self.main, Signal::SIGCONT)?;
-                    self.platform.unsuspend(ctx)?;
-                    self.handle_quit().await?;
-                    return Ok(());
+                // The outer loop's battery check is parked while we sit in here, and this suspend
+                // only blanks the panel -- the SoC still runs. Without this, a device suspended
+                // near empty would draw idle current until the deadline and go flat, which loses
+                // the game: a flat battery gets no clean shutdown.
+                _ = tokio::time::sleep(BATTERY_UPDATE_INTERVAL) => {
+                    battery.update()?;
+                    if battery.percentage() <= BATTERY_SHUTDOWN_THRESHOLD && !battery.charging() {
+                        warn!("battery is low while suspended, shutting down");
+                        return self.wake_and_quit(ctx).await;
+                    }
+                }
+                _ = sleep_until_wake(deadline) => {
+                    info!("suspend timeout, shutting down");
+                    return self.wake_and_quit(ctx).await;
                 }
             }
         }
@@ -680,6 +700,22 @@ impl AlliumD<DefaultPlatform> {
         info!("waking up from suspend...");
         signal(&self.main, Signal::SIGCONT)?;
         self.platform.unsuspend(ctx)
+    }
+
+    /// Undoes a suspend, then shuts down properly.
+    ///
+    /// The SIGCONT has to come first. `handle_quit` sends SIGTERM and gives the child five seconds,
+    /// and a stopped process cannot run its handler -- so without this RetroArch never writes its
+    /// auto-save and is SIGKILLed instead. That auto-save is the only thing saving the game;
+    /// alliumd sends no save-state command on any shutdown path.
+    #[cfg(unix)]
+    async fn wake_and_quit(
+        &mut self,
+        ctx: <DefaultPlatform as Platform>::SuspendContext,
+    ) -> Result<()> {
+        signal(&self.main, Signal::SIGCONT)?;
+        self.platform.unsuspend(ctx)?;
+        self.handle_quit().await
     }
 
     #[cfg(unix)]

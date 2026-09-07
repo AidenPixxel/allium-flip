@@ -31,6 +31,10 @@ pub struct MiyooPlatform {
 
 pub struct SuspendContext {
     brightness: u8,
+    /// Whether the backlight really was switched off, so it is only switched back on if it was.
+    /// Without this, a failed switch-off followed by a successful switch-on would be harmless, but
+    /// the reverse would leave the panel dark with no way back.
+    backlight_off: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,15 +117,38 @@ impl Platform for MiyooPlatform {
 
     fn suspend(&self) -> Result<Self::SuspendContext> {
         let brightness = screen::get_brightness()?;
-        let ctx = SuspendContext { brightness };
-        screen::set_brightness(0)?;
         screen::blank(true)?;
-        Ok(ctx)
+        // Floors at 3 rather than reaching 0, which is exactly why the backlight has to be cut
+        // separately below -- but it still has to happen, so that a device where the PWM cannot be
+        // switched off is left dim rather than at full brightness behind a blank panel.
+        screen::set_brightness(0)?;
+
+        // Then cut the backlight outright. Non-fatal on purpose: alliumd propagates a failure here
+        // out of its suspend handler, and a daemon that dies leaves the updater rebooting the
+        // device forever. A missing node just means the backlight stays dim, as it did before.
+        let backlight_off = match screen::set_backlight(false) {
+            Ok(()) => true,
+            Err(err) => {
+                warn!("could not switch the backlight off: {err}");
+                false
+            }
+        };
+
+        Ok(SuspendContext {
+            brightness,
+            backlight_off,
+        })
     }
 
     fn unsuspend(&self, ctx: Self::SuspendContext) -> Result<()> {
-        screen::blank(false)?;
+        // Duty cycle before the light, then the picture last
         screen::set_brightness(ctx.brightness)?;
+        if ctx.backlight_off
+            && let Err(err) = screen::set_backlight(true)
+        {
+            warn!("could not switch the backlight back on: {err}");
+        }
+        screen::blank(false)?;
         Ok(())
     }
 
