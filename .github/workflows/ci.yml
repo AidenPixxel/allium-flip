@@ -56,11 +56,15 @@ jobs:
           profile: minimal
           override: true
 
+      # myctl is listed because its argument ids are only checked at runtime: clap panics on a
+      # `get_one` id that was never declared, which a compile of the binary cannot catch.
+      # It builds here despite the proprietary Miyoo libraries because ffi/build.rs only links
+      # those for the armv7 target.
       - name: cargo test
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --package common --package alliumd --package allium-launcher --package allium-menu
+          args: --package common --package alliumd --package allium-launcher --package allium-menu --package myctl
 
   build:
     name: Build Artifact
