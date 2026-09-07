@@ -3,6 +3,41 @@ export ROOT="/mnt/SDCARD"
 export LD_LIBRARY_PATH="/lib:/config/lib:/customer/lib:$ROOT/miyoo:$ROOT/.tmp_update/lib"
 export PATH="$ROOT/.tmp_update/bin:$PATH"
 
+# Decide whether a charger just woke us, before anything lights the panel.
+#
+# The hardware powers on by itself when a charger is connected, so "don't wake on charge" cannot
+# be honoured from inside Allium -- by the time alliumd runs the backlight below is already on
+# and the launcher is painting. It has to happen here, first.
+#
+# On the Flip the lid tells us why we booted: the power button is inside the clamshell, so a
+# deliberate power-on always has the lid open, while a charger-triggered boot happens with it
+# shut. Anything else falls through to a normal boot.
+if grep -q '"charging_boot_action":"PowerOff"' "$ROOT/.allium/state/power.json" 2>/dev/null; then
+    charging=0
+    if [ -f /customer/app/axp_test ]; then
+        # Same field alliumd reads: 3 means charging
+        if /customer/app/axp_test 2>/dev/null | grep -q '"charging"[[:space:]]*:[[:space:]]*3'; then
+            charging=1
+        fi
+    fi
+
+    lid_shut=0
+    hall=/sys/devices/soc0/soc/soc:hall-mh248/hallvalue
+    if [ -f "$hall" ] && [ "$(cat "$hall" 2>/dev/null)" != "1" ]; then
+        lid_shut=1
+    fi
+
+    if [ "$charging" = "1" ] && [ "$lid_shut" = "1" ]; then
+        sync
+        poweroff
+        # Never fall through: the tail of this script reboots unconditionally, so a poweroff that
+        # does not take effect immediately would boot us straight back into this check.
+        while true; do
+            sleep 60
+        done
+    fi
+fi
+
 # init backlight
 echo 0 >/sys/class/pwm/pwmchip0/export
 echo 800 >/sys/class/pwm/pwmchip0/pwm0/period

@@ -553,13 +553,21 @@ impl AlliumD<DefaultPlatform> {
     }
 
     /// Power back down after a charger-triggered boot, unless the user is actually trying to
-    /// turn the device on. We can't tell those two apart -- both look like "charging at
-    /// startup" -- so wait briefly for a keypress first. The screen stays dark throughout.
+    /// turn the device on. We can't tell those two apart here -- both look like "charging at
+    /// startup" -- so wait briefly for a keypress first.
+    ///
+    /// This is only the fallback. `.tmp_update/updater` makes the same decision before the
+    /// backlight is switched on, which is the only way to avoid lighting the panel at all; by the
+    /// time this runs the boot has finished and the launcher is painting. Blank the screen so at
+    /// least the remaining second is dark.
     #[cfg(unix)]
     async fn handle_charging_power_off(&mut self) -> Result<()> {
         info!("charging, powering off unless a key is pressed");
 
         self.hide_osd();
+
+        #[allow(clippy::let_unit_value)]
+        let ctx = self.platform.suspend()?;
 
         // `poll` only ever resolves on a real key or lid event, so anything at all here means a
         // person is at the device.
@@ -570,10 +578,18 @@ impl AlliumD<DefaultPlatform> {
 
         if woken {
             info!("key pressed while charging, booting normally");
-            return Ok(());
+            return self.platform.unsuspend(ctx);
         }
 
-        self.platform.shutdown()
+        self.platform.shutdown()?;
+
+        // shutdown execs `poweroff`, so reaching here means it failed to replace us. Returning
+        // would let the event loop carry on and, once alliumd exits, the updater's unconditional
+        // reboot loop would boot us straight back into this -- so park instead.
+        error!("poweroff did not take effect, holding to avoid a boot loop");
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
     }
 
     /// Park in the charge screen until the user presses Power or unplugs the cable. With
