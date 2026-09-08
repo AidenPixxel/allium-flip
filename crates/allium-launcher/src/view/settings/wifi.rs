@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -19,6 +19,28 @@ use tokio::sync::mpsc::Sender;
 
 use crate::view::settings::{ChildState, SettingsChild};
 
+/// How long the status row reports progress before it names a likely cause instead
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// One attempt to join the network, as far as the status row can tell
+struct Connecting {
+    started: Instant,
+    /// wpa_supplicant reached the key handshake at some point: the network exists and answered
+    seen_handshake: bool,
+    /// Association completed at some point: whatever is missing is the address
+    seen_completed: bool,
+}
+
+impl Connecting {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            seen_handshake: false,
+            seen_completed: false,
+        }
+    }
+}
+
 pub struct Wifi {
     rect: Rect,
     res: Resources,
@@ -26,6 +48,8 @@ pub struct Wifi {
     list: SettingsList,
     has_ip_address: bool,
     check_ip_delay: Duration,
+    /// The attempt in progress while Wi-Fi is on and there is no address yet
+    connecting: Option<Connecting>,
     button_hints: ButtonHints<String>,
     edit_button: Option<ButtonHint<String>>,
 }
@@ -154,8 +178,58 @@ impl Wifi {
             list,
             has_ip_address: false,
             check_ip_delay: Duration::ZERO,
+            connecting: None,
             button_hints,
             edit_button,
+        }
+    }
+
+    /// Starts the attempt the status row reports on over again -- Wi-Fi was just switched on, or
+    /// the network name or password changed underneath a running one
+    fn restart_connecting(&mut self) {
+        self.has_ip_address = false;
+        self.check_ip_delay = Duration::ZERO;
+        self.connecting = Some(Connecting::new());
+    }
+
+    fn set_status(&mut self, text: String) {
+        self.list.set_right(
+            1,
+            Box::new(Label::new(Point::zero(), text, Alignment::Right, None)),
+        );
+    }
+
+    /// What to show while there is no address yet.
+    ///
+    /// For the first `CONNECT_TIMEOUT` this reports progress. After that it names the most likely
+    /// cause, from how far the attempt ever got: never past scanning, the network was not found
+    /// (wrong name, hidden, or 5 GHz only -- this radio is 2.4 GHz); a key handshake that never
+    /// completed is the password; an association that never got an address is DHCP. Before this,
+    /// every one of those read "Connecting..." forever.
+    fn connecting_status_key(&mut self) -> &'static str {
+        let connecting = self.connecting.get_or_insert_with(Connecting::new);
+        let state = wifi::association_state().unwrap_or_default();
+        match state.as_str() {
+            "COMPLETED" => connecting.seen_completed = true,
+            "4WAY_HANDSHAKE" | "GROUP_HANDSHAKE" => connecting.seen_handshake = true,
+            _ => {}
+        }
+
+        if connecting.started.elapsed() < CONNECT_TIMEOUT {
+            return match state.as_str() {
+                "COMPLETED" => "settings-wifi-getting-ip",
+                "AUTHENTICATING" | "ASSOCIATING" | "ASSOCIATED" | "4WAY_HANDSHAKE"
+                | "GROUP_HANDSHAKE" => "settings-wifi-connecting",
+                _ => "settings-wifi-searching",
+            };
+        }
+
+        if connecting.seen_completed {
+            "settings-wifi-no-ip"
+        } else if connecting.seen_handshake {
+            "settings-wifi-wrong-password"
+        } else {
+            "settings-wifi-network-not-found"
         }
     }
 }
@@ -173,39 +247,18 @@ impl View for Wifi {
                 // Try to get the IP address if we don't have it yet
                 if let Some(ip_address) = wifi::ip_address() {
                     self.has_ip_address = true;
-                    self.list.set_right(
-                        1,
-                        Box::new(Label::new(
-                            Point::zero(),
-                            ip_address,
-                            Alignment::Right,
-                            None,
-                        )),
-                    );
+                    self.connecting = None;
+                    self.set_status(ip_address);
                 } else {
-                    let locale = self.res.get::<Locale>();
-                    self.list.set_right(
-                        1,
-                        Box::new(Label::new(
-                            Point::zero(),
-                            locale.t("settings-wifi-connecting"),
-                            Alignment::Right,
-                            None,
-                        )),
-                    );
+                    let key = self.connecting_status_key();
+                    let text = self.res.get::<Locale>().t(key);
+                    self.set_status(text);
                 }
             }
-        } else if self.has_ip_address {
+        } else if self.has_ip_address || self.connecting.is_some() {
             self.has_ip_address = false;
-            self.list.set_right(
-                1,
-                Box::new(Label::new(
-                    Point::zero(),
-                    String::new(),
-                    Alignment::Right,
-                    None,
-                )),
-            );
+            self.connecting = None;
+            self.set_status(String::new());
         }
     }
 
@@ -263,7 +316,11 @@ impl View for Wifi {
                 if let Command::ValueChanged(i, val) = command {
                     match i {
                         0 => {
-                            self.settings.set_wifi(val.as_bool().unwrap())?;
+                            let enabled = val.as_bool().unwrap();
+                            self.settings.set_wifi(enabled)?;
+                            if enabled {
+                                self.restart_connecting();
+                            }
                             let commands = commands.clone();
                             tokio::spawn(async move {
                                 if wifi::wait_for_wifi().await.is_ok() {
@@ -272,12 +329,20 @@ impl View for Wifi {
                             });
                         }
                         1 => {} // ip address
-                        2 => self
-                            .settings
-                            .set_ssid(val.as_string().unwrap().to_string())?,
-                        3 => self
-                            .settings
-                            .set_password(val.as_string().unwrap().to_string())?,
+                        2 => {
+                            self.settings
+                                .set_ssid(val.as_string().unwrap().to_string())?;
+                            if self.settings.wifi {
+                                self.restart_connecting();
+                            }
+                        }
+                        3 => {
+                            self.settings
+                                .set_password(val.as_string().unwrap().to_string())?;
+                            if self.settings.wifi {
+                                self.restart_connecting();
+                            }
+                        }
                         4 => self.settings.toggle_ntp(val.as_bool().unwrap())?,
                         5 => {
                             let enabled = val.as_bool().unwrap();
