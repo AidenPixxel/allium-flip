@@ -12,7 +12,7 @@ use common::battery::Battery;
 use common::constants::{
     ALLIUM_GAME_INFO, ALLIUM_LAUNCHER, ALLIUM_SD_ROOT, ALLIUM_VERSION, ALLIUMD_STATE,
     BATTERY_SHUTDOWN_THRESHOLD, BATTERY_UPDATE_INTERVAL, BATTERY_WARNING_THRESHOLD,
-    CHARGE_POWER_OFF_GRACE, MAX_BRIGHTNESS, MAX_VOLUME,
+    CHARGE_POWER_OFF_GRACE, MAX_BRIGHTNESS, MAX_VOLUME, RELAUNCH_MARKER,
 };
 use common::display::settings::DisplaySettings;
 use common::locale::{Locale, LocaleSettings};
@@ -377,7 +377,18 @@ impl AlliumD<DefaultPlatform> {
                         if !self.is_terminating {
                             info!("main process terminated, recording play time");
                             self.update_play_time()?;
-                            GameInfo::delete()?;
+
+                            // Deleting the marker is how it is consumed, so a relaunch happens
+                            // exactly once. Keeping the game info is what makes `spawn_main`
+                            // re-exec the same game instead of dropping back to the launcher --
+                            // which is the only way a setting RetroArch reads at content load can
+                            // be made to take effect without the user quitting by hand.
+                            if fs::remove_file(RELAUNCH_MARKER).is_ok() {
+                                info!("relaunch requested, starting the game again");
+                            } else {
+                                GameInfo::delete()?;
+                            }
+
                             self.main = spawn_main().await?;
                         }
                     }

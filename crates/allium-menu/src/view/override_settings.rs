@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::fs;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use common::command::{Command, Value};
+use common::constants::RELAUNCH_MARKER;
 use common::database::Database;
 use common::display::Display;
 use common::game_info::GameInfo;
@@ -12,6 +14,7 @@ use common::performance::{self, PerformanceMode};
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
 use common::power::PowerSettings;
 use common::resources::Resources;
+use common::retroarch::RetroArchCommand;
 use common::retroarch_config::OverrideScope;
 use common::retroarch_options::{Overrides, PERFORMANCE_KEY, Setting, Target};
 use common::stylesheet::Stylesheet;
@@ -63,7 +66,16 @@ impl OverrideSettings {
 
         let mut button_hints = ButtonHints::new(
             res.clone(),
-            vec![],
+            // On the left, away from Edit and Back, because it acts on the whole screen rather
+            // than the highlighted row -- and because its presence is what tells you a change is
+            // waiting for a relaunch at all.
+            vec![ButtonHint::new(
+                res.clone(),
+                Point::zero(),
+                Key::Y,
+                locale.t("override-apply"),
+                Alignment::Left,
+            )],
             vec![
                 ButtonHint::new(
                     res.clone(),
@@ -226,6 +238,25 @@ impl OverrideSettings {
         }
     }
 
+    /// Quits the game and has the daemon start it again, so the settings just written take effect.
+    ///
+    /// The only way to apply them: RetroArch reads its override files when it loads content and
+    /// its command interface has no setter -- all forty-odd commands are actions. Quitting is also
+    /// what makes RetroArch write its auto-save, so with Auto Save on this lands the player back
+    /// roughly where they were.
+    async fn apply_now(&self, commands: &Sender<Command>) -> Result<()> {
+        // Written before the quit, because the daemon reads it the moment the child exits
+        if let Err(err) = fs::write(RELAUNCH_MARKER, "") {
+            warn!("could not ask for a relaunch, quitting to the launcher instead: {err}");
+        }
+
+        commands
+            .send(Command::RetroArchCommand(RetroArchCommand::Quit))
+            .await?;
+        commands.send(Command::Exit).await?;
+        Ok(())
+    }
+
     fn refresh_description(&mut self) {
         let locale = self.res.get::<Locale>();
         let text = match self.setting(self.list.selected()) {
@@ -360,6 +391,10 @@ impl View for OverrideSettings {
         }
 
         match event {
+            KeyEvent::Pressed(Key::Y) => {
+                self.apply_now(&commands).await?;
+                Ok(true)
+            }
             KeyEvent::Pressed(Key::B) => {
                 bubble.push_back(Command::CloseView);
                 Ok(true)

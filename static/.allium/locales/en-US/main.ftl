@@ -220,6 +220,7 @@ ingame-menu-options = Options
 
 # Per-game / per-console / per-core RetroArch overrides. These strings sit in a one-line strip in
 # the in-game menu, which has no frame timer and so cannot scroll -- keep them short enough to fit.
+override-apply = Apply Now
 override-scope = Applies To
 override-scope-game = This Game
 override-scope-console = This Console

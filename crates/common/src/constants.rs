@@ -100,6 +100,13 @@ pub const NIGHT_MODE_BLUE_SCALE: f32 = 0.35;
 /// Holding green and blue at 15 makes that condition unreachable whatever the user's base red is.
 pub const NIGHT_MODE_CHANNEL_FLOOR: u8 = 15;
 
+/// Set by the in-game menu to ask for the running game to be started again rather than dropped
+/// back to the launcher, so a setting RetroArch only reads at content load takes effect.
+///
+/// On tmpfs, like `/tmp/stay_awake`, so it cannot survive a reboot and strand the device
+/// relaunching. The daemon consumes it by deleting it.
+pub const RELAUNCH_MARKER: &str = "/tmp/allium_relaunch";
+
 /// How long the daemon waits for a keypress before powering back off after a charger-triggered
 /// boot, so pressing Power while the cable is attached still turns the device on.
 pub const CHARGE_POWER_OFF_GRACE: Duration = Duration::from_millis(1500);

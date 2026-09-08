@@ -9,7 +9,9 @@ use async_trait::async_trait;
 use base32::encode;
 use common::battery::Battery;
 use common::command::Command;
-use common::constants::{ALLIUM_MENU_STATE, ALLIUM_SCREENSHOTS_DIR, SAVE_STATE_IMAGE_WIDTH};
+use common::constants::{
+    ALLIUM_MENU_STATE, ALLIUM_SCREENSHOTS_DIR, RELAUNCH_MARKER, SAVE_STATE_IMAGE_WIDTH,
+};
 use common::display::Display;
 use common::game_info::GameInfo;
 use common::geom::{Alignment, Point, Rect};
@@ -360,6 +362,10 @@ where
                 commands.send(Command::Exit).await?;
             }
             MenuEntry::Quit => {
+                // Quit means the launcher, so drop any relaunch the override screens asked for --
+                // otherwise a request whose own quit never landed would fire on this one instead.
+                let _ = fs::remove_file(RELAUNCH_MARKER);
+
                 if self.retroarch_info.is_some() {
                     let core = self.res.get::<GameInfo>().core.to_owned();
                     commands
