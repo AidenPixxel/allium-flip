@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 use framebuffer::Framebuffer;
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 use tiny_skia::{Pixmap, PixmapMut, PixmapRef};
 
 use crate::display::color::Color;
@@ -18,6 +18,14 @@ const STAMP_POLL: Duration = Duration::from_millis(1);
 /// the visible page without ever moving `yoffset`, in which case a flip is never observed and the
 /// plate would be overwritten for good.
 const STAMP_FLOOR: Duration = Duration::from_millis(8);
+/// Gap between blits while sweeping the window from vblank to the plate's own scanout
+const STAMP_SWEEP: Duration = Duration::from_millis(3);
+/// How many vblank waits to time before deciding whether the driver really blocks on them
+const VBLANK_PROBES: u32 = 4;
+/// A vblank wait this short is not waiting on a panel, whatever the ioctl returned
+const VBLANK_MIN: Duration = Duration::from_millis(4);
+/// ...and one this long is not a frame worth chasing
+const VBLANK_MAX: Duration = Duration::from_millis(40);
 
 // The standard fbdev vblank wait. It is not in the vendor's mstarFb.h, whose custom range starts
 // at 'F' 0x60, so support is unknown until probed -- but the patched RetroArch exposes a working
@@ -34,6 +42,27 @@ fn wait_for_vsync(fd: std::os::fd::RawFd) -> nix::Result<()> {
     let zero: u32 = 0;
     // SAFETY: the driver reads a single u32 by pointer; `zero` outlives the call
     unsafe { fb_wait_for_vsync(fd, &zero) }.map(|_| ())
+}
+
+/// How far apart consecutive vblanks are, or `None` if the driver has no such ioctl.
+///
+/// Timing it rather than checking the return code is the point. A driver that accepts the call and
+/// returns straight away is indistinguishable from a working one by `is_ok()` alone, and would turn
+/// the stamping loop -- whose only sleep is the wait itself -- into a hot spin, stealing the core
+/// the emulator is running on and rewriting the plate while the panel is reading it.
+fn measure_vblank(fd: std::os::fd::RawFd) -> Option<Duration> {
+    // Discard the first: it starts partway into a frame, so it is a partial period
+    wait_for_vsync(fd).ok()?;
+    let mut period = Duration::MAX;
+    for _ in 0..VBLANK_PROBES {
+        let start = Instant::now();
+        wait_for_vsync(fd).ok()?;
+        // The shortest is the one least padded by scheduling delay
+        period = period.min(start.elapsed());
+    }
+    (VBLANK_MIN..=VBLANK_MAX)
+        .contains(&period)
+        .then_some(period)
 }
 
 pub struct FramebufferDisplay {
@@ -341,16 +370,24 @@ impl Display for FramebufferDisplay {
         };
 
         // Waiting on vblank is the only trigger that is right whether or not the app pans, so
-        // prefer it and fall back to polling only if the driver has no such ioctl.
-        let vsync = wait_for_vsync(iface.device.as_raw_fd()).is_ok();
-        debug!(
-            "stamping with {}",
-            if vsync {
-                "vblank waits"
-            } else {
-                "page polling"
-            }
-        );
+        // prefer it -- but only when the driver really blocks on it. Paired with each vblank is the
+        // deadline that actually matters: the moment the panel reads the plate's own rows. The
+        // panel is mounted upside down, so a rect at logical `area` is scanned starting at
+        // `height - area.bottom()` rows in.
+        let height = self.height().max(1);
+        let vblank = measure_vblank(iface.device.as_raw_fd()).map(|frame| {
+            let first_row = (height as i32 - area.bottom()).clamp(0, height as i32) as u32;
+            (frame, frame * first_row / height)
+        });
+        // At info level deliberately: two attempts at this flicker have turned on which of these
+        // branches the device actually takes, and RUST_LOG is info in the boot script.
+        match vblank {
+            Some((frame, pre_scanout)) => info!(
+                "stamping on vblank: {frame:?} frame, sweeping the {pre_scanout:?} before the plate is scanned"
+            ),
+            None => info!("stamping by page polling: no vblank wait that actually blocks"),
+        }
+        let pre_scanout = vblank.map(|(_, pre_scanout)| pre_scanout);
 
         // The hold keeps a handle on the same buffer the thread reads, so later content changes
         // go through `refresh_rect_hold` instead of stopping this thread and starting another
@@ -365,13 +402,26 @@ impl Display for FramebufferDisplay {
             let mut last_blit = Instant::now();
 
             while !stop.load(Ordering::Relaxed) {
-                if vsync {
-                    // Blocks in the kernel, so this costs nothing until the panel is ready. The
-                    // blit then lands early in the frame, well before the plate is scanned out.
+                if let Some(pre_scanout) = pre_scanout {
+                    // Blocks in the kernel, so this costs nothing until the panel is ready
                     if wait_for_vsync(fd).is_err() {
                         std::thread::sleep(STAMP_POLL);
                     }
-                    stamp.blit(&mut iface.frame);
+                    // Then sweep from vblank up to the moment the plate is read. Blitting once at
+                    // vblank -- what this did before -- is too early: the app draws its frame
+                    // *after* that and wipes the plate, so the panel scans a gap. Blitting once at
+                    // the deadline instead is too late whenever the app's draw runs long. Sweeping
+                    // costs a few small memcpys and makes the last write before the plate is
+                    // scanned ours, whatever the app's frame timing.
+                    let start = Instant::now();
+                    loop {
+                        stamp.blit(&mut iface.frame);
+                        let left = pre_scanout.saturating_sub(start.elapsed());
+                        if left.is_zero() {
+                            break;
+                        }
+                        std::thread::sleep(left.min(STAMP_SWEEP));
+                    }
                     continue;
                 }
 
