@@ -338,7 +338,13 @@ pub async fn download_update_with_progress(
                 last_progress_update = now;
                 info!(
                     "Downloaded {}% ({}/{} bytes)",
-                    downloaded * 100 / total_size,
+                    // A server that omits Content-Length leaves this zero, and dividing by it
+                    // would panic a second into the download rather than at the start of it
+                    if total_size > 0 {
+                        downloaded * 100 / total_size
+                    } else {
+                        0
+                    },
                     downloaded,
                     total_size
                 );
@@ -359,6 +365,16 @@ pub async fn download_update_with_progress(
     }
 
     writer.flush().context("Failed to flush file")?;
+
+    // Flushing only hands the bytes to the kernel. The checksum below is computed over the
+    // downloaded stream, so without forcing them out to the card it attests to what was received
+    // rather than to what is on disk -- and the caller reboots the moment this returns, so a
+    // write-back that never completed would leave an unverified, truncated archive for the boot
+    // script to find.
+    writer
+        .get_ref()
+        .sync_all()
+        .context("Failed to sync update file to disk")?;
 
     // Verify SHA256 checksum
     info!("Verifying SHA256 checksum...");
