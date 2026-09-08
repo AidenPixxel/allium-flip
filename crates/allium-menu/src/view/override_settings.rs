@@ -1,0 +1,328 @@
+use std::collections::VecDeque;
+
+use anyhow::Result;
+use async_trait::async_trait;
+use common::command::{Command, Value};
+use common::display::Display;
+use common::geom::{Alignment, Point, Rect};
+use common::locale::Locale;
+use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
+use common::resources::Resources;
+use common::retroarch_config::OverrideScope;
+use common::retroarch_options::{Overrides, Setting};
+use common::stylesheet::Stylesheet;
+use common::view::{ButtonHint, ButtonHints, Label, Select, SettingsList, View};
+use log::warn;
+use tokio::sync::mpsc::Sender;
+
+/// Row 0 is always the scope picker; the settings start below it.
+const ROW_SCOPE: usize = 0;
+
+/// A screen of RetroArch override rows, driven by whichever table it is handed.
+///
+/// Both Controls and Options are this view with a different `settings` table, which is why adding
+/// a setting is a table entry rather than a new screen.
+pub struct OverrideSettings {
+    rect: Rect,
+    res: Resources,
+    settings: &'static [Setting],
+    overrides: Overrides,
+    /// The scopes offered, in display order. A ROM at the top of the Roms directory has no folder,
+    /// so Console is not always among them and the Select index has to be mapped back through this.
+    scopes: Vec<OverrideScope>,
+    scope: OverrideScope,
+    list: SettingsList,
+    description: Label<String>,
+    description_rect: Rect,
+    button_hints: ButtonHints<String>,
+}
+
+fn scope_key(scope: OverrideScope) -> &'static str {
+    match scope {
+        OverrideScope::Game => "override-scope-game",
+        OverrideScope::Console => "override-scope-console",
+        OverrideScope::Core => "override-scope-core",
+    }
+}
+
+impl OverrideSettings {
+    pub fn new(
+        rect: Rect,
+        res: Resources,
+        settings: &'static [Setting],
+        overrides: Overrides,
+    ) -> Self {
+        let Rect { x, y, w, .. } = rect;
+
+        let locale = res.get::<Locale>();
+        let styles = res.get::<Stylesheet>();
+
+        let mut button_hints = ButtonHints::new(
+            res.clone(),
+            vec![],
+            vec![
+                ButtonHint::new(
+                    res.clone(),
+                    Point::zero(),
+                    Key::A,
+                    locale.t("button-edit"),
+                    Alignment::Right,
+                ),
+                ButtonHint::new(
+                    res.clone(),
+                    Point::zero(),
+                    Key::B,
+                    locale.t("button-back"),
+                    Alignment::Right,
+                ),
+            ],
+        );
+
+        let scopes: Vec<OverrideScope> = [
+            OverrideScope::Game,
+            OverrideScope::Console,
+            OverrideScope::Core,
+        ]
+        .into_iter()
+        .filter(|scope| overrides.supports(*scope))
+        .collect();
+        let scope = scopes.first().copied().unwrap_or_default();
+
+        let button_hints_rect = button_hints.bounding_box(&styles);
+        let available = (button_hints_rect.y - y) as u32;
+        let description_height = styles.ui.ui_font.size + styles.ui.padding_y as u32;
+        let list_height = available.saturating_sub(description_height + styles.ui.margin_y as u32);
+        let description_rect = Rect::new(
+            x + styles.ui.margin_x,
+            y + list_height as i32,
+            w - styles.ui.margin_x as u32 * 2,
+            description_height,
+        );
+
+        let mut labels = vec![locale.t("override-scope")];
+        let mut rights: Vec<Box<dyn View>> = vec![Box::new(Select::new(
+            Point::zero(),
+            0,
+            scopes.iter().map(|s| locale.t(scope_key(*s))).collect(),
+            Alignment::Right,
+        ))];
+
+        for setting in settings {
+            labels.push(locale.t(setting.label));
+            let map = overrides.read(scope, setting.target);
+            rights.push(Box::new(Select::new(
+                Point::zero(),
+                setting.current(&map),
+                setting
+                    .choices
+                    .iter()
+                    .map(|choice| locale.t(choice.label))
+                    .collect(),
+                Alignment::Right,
+            )));
+        }
+
+        let list = SettingsList::new(
+            res.clone(),
+            Rect::new(
+                x + styles.ui.margin_x,
+                y,
+                w - styles.ui.margin_x as u32 * 2,
+                list_height,
+            ),
+            labels,
+            rights,
+            styles.ui.ui_font.size + styles.ui.padding_y as u32,
+        );
+
+        // No width, and no scrolling: the in-game menu's event loop has no frame timer and never
+        // calls `update`, so a marquee here would sit frozen. These strings have to be short
+        // enough to fit instead.
+        let description = Label::new(
+            Point::new(description_rect.x, description_rect.y),
+            String::new(),
+            Alignment::Left,
+            None,
+        );
+
+        drop(locale);
+        drop(styles);
+
+        let mut this = Self {
+            rect,
+            res,
+            settings,
+            overrides,
+            scopes,
+            scope,
+            list,
+            description,
+            description_rect,
+            button_hints,
+        };
+        this.refresh_description();
+        this
+    }
+
+    /// The setting a row edits, or `None` for the scope row.
+    fn setting(&self, row: usize) -> Option<&'static Setting> {
+        row.checked_sub(1).and_then(|i| self.settings.get(i))
+    }
+
+    fn refresh_description(&mut self) {
+        let locale = self.res.get::<Locale>();
+        let text = match self.setting(self.list.selected()) {
+            Some(setting) => locale.t(setting.description),
+            None => locale.t("override-desc-scope"),
+        };
+        drop(locale);
+        self.description.set_text(text);
+    }
+
+    /// Rebuilds every value row against the newly chosen scope.
+    ///
+    /// Each row shows what is set at *this* scope only, so switching from Game to Core swaps the
+    /// whole screen's values rather than leaving the previous tier's showing.
+    fn reload_rows(&mut self) {
+        let locale = self.res.get::<Locale>();
+        let rows: Vec<(usize, usize, Vec<String>)> = self
+            .settings
+            .iter()
+            .enumerate()
+            .map(|(i, setting)| {
+                let map = self.overrides.read(self.scope, setting.target);
+                (
+                    i + 1,
+                    setting.current(&map),
+                    setting
+                        .choices
+                        .iter()
+                        .map(|choice| locale.t(choice.label))
+                        .collect(),
+                )
+            })
+            .collect();
+        drop(locale);
+
+        for (row, current, choices) in rows {
+            self.list.set_right(
+                row,
+                Box::new(Select::new(
+                    Point::zero(),
+                    current,
+                    choices,
+                    Alignment::Right,
+                )),
+            );
+        }
+    }
+
+    /// Writes a committed choice straight through to disk.
+    ///
+    /// Eagerly, not on close: the menu throws its whole view tree away at the start of every
+    /// session, so anything held in memory is simply lost.
+    fn commit(&self, row: usize, choice: usize) {
+        let Some(setting) = self.setting(row) else {
+            return;
+        };
+
+        if let Err(err) = self.overrides.apply(self.scope, setting, choice) {
+            warn!("could not write {}: {err}", setting.label);
+        }
+    }
+}
+
+#[async_trait(?Send)]
+impl View for OverrideSettings {
+    fn draw(
+        &mut self,
+        display: &mut <DefaultPlatform as Platform>::Display,
+        styles: &Stylesheet,
+    ) -> Result<bool> {
+        let mut drawn = false;
+
+        drawn |= self.list.should_draw() && self.list.draw(display, styles)?;
+
+        if self.description.should_draw() {
+            // Sits between the list and the hints, so neither of them restores it
+            display.load(self.description_rect)?;
+            drawn |= self.description.draw(display, styles)?;
+        }
+
+        if self.button_hints.should_draw() {
+            display.load(self.button_hints.bounding_box(styles))?;
+            drawn |= self.button_hints.draw(display, styles)?;
+        }
+
+        Ok(drawn)
+    }
+
+    fn should_draw(&self) -> bool {
+        self.list.should_draw() || self.description.should_draw() || self.button_hints.should_draw()
+    }
+
+    fn set_should_draw(&mut self) {
+        self.list.set_should_draw();
+        self.description.set_should_draw();
+        self.button_hints.set_should_draw();
+    }
+
+    async fn handle_key_event(
+        &mut self,
+        event: KeyEvent,
+        commands: Sender<Command>,
+        bubble: &mut VecDeque<Command>,
+    ) -> Result<bool> {
+        if self
+            .list
+            .handle_key_event(event, commands.clone(), bubble)
+            .await?
+        {
+            while let Some(command) = bubble.pop_front() {
+                if let Command::ValueChanged(row, Value::Int(value)) = command {
+                    let value = value.max(0) as usize;
+                    if row == ROW_SCOPE {
+                        let current = self.scope;
+                        self.scope = self.scopes.get(value).copied().unwrap_or(current);
+                        self.reload_rows();
+                    } else {
+                        self.commit(row, value);
+                    }
+                }
+            }
+
+            // The list consumed the event, so either the highlight moved or a value changed --
+            // both alter what should be described, and neither is signalled directly.
+            self.refresh_description();
+            return Ok(true);
+        }
+
+        match event {
+            KeyEvent::Pressed(Key::B) => {
+                bubble.push_back(Command::CloseView);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn children(&self) -> Vec<&dyn View> {
+        vec![&self.list, &self.description, &self.button_hints]
+    }
+
+    fn children_mut(&mut self) -> Vec<&mut dyn View> {
+        vec![
+            &mut self.list,
+            &mut self.description,
+            &mut self.button_hints,
+        ]
+    }
+
+    fn bounding_box(&mut self, _styles: &Stylesheet) -> Rect {
+        self.rect
+    }
+
+    fn set_position(&mut self, _point: Point) {
+        unimplemented!()
+    }
+}

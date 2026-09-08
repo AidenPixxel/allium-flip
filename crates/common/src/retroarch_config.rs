@@ -184,12 +184,12 @@ pub fn apply(path: &Path, changes: &[(&str, Option<String>)]) -> Result<()> {
     fs::write(path, rendered).with_context(|| format!("failed to write {}", path.display()))
 }
 
-/// Reads a file in this format, or an empty map when it does not exist.
+/// Reads a file in this format, or an empty map when it does not exist -- which is the normal case
+/// for a scope nothing has been set at yet.
 pub fn read(path: &Path) -> BTreeMap<String, String> {
-    match fs::read_to_string(path) {
-        Ok(text) => parse(&text),
-        Err(_) => BTreeMap::new(),
-    }
+    fs::read_to_string(path)
+        .map(|text| parse(&text))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

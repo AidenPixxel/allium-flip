@@ -209,7 +209,7 @@ ingame-menu-continue = Continue
 ingame-menu-save = Save
 ingame-menu-load = Load
 ingame-menu-reset = Reset
-ingame-menu-settings = Settings
+ingame-menu-settings = RetroArch Menu
 ingame-menu-guide = Guide
 ingame-menu-quit = Quit
 ingame-menu-slot = Slot { $slot }
@@ -222,6 +222,68 @@ ingame-menu-performance-low = Low
 ingame-menu-performance-medium = Medium
 ingame-menu-performance-high = High
 ingame-menu-performance-max = Max
+ingame-menu-controls = Controls
+ingame-menu-options = Options
+
+# Per-game / per-console / per-core RetroArch overrides. These strings sit in a one-line strip in
+# the in-game menu, which has no frame timer and so cannot scroll -- keep them short enough to fit.
+override-scope = Applies To
+override-scope-game = This Game
+override-scope-console = This Console
+override-scope-core = This Core
+override-desc-scope = Which games these settings apply to.
+override-default = Default
+override-on = On
+override-off = Off
+
+override-aspect-ratio = Aspect Ratio
+override-desc-aspect-ratio = Stretch to fill, or keep the shape.
+override-aspect-ratio-keep = Keep Aspect
+override-aspect-ratio-full = Full Screen
+override-auto-save = Auto Save on Exit
+override-desc-auto-save = Save your place when the game closes.
+override-auto-load = Auto Load on Launch
+override-desc-auto-load = Resume where you left off.
+override-fast-forward-ratio = Fast Forward Speed
+override-desc-fast-forward-ratio = How fast Fast Forward runs.
+override-ratio-2x = 2x
+override-ratio-4x = 4x
+override-ratio-unlimited = Unlimited
+override-show-fps = Show FPS
+override-desc-show-fps = Draw a frame counter over the game.
+override-rewind = Rewind
+override-desc-rewind = Costs memory and speed even unused.
+
+override-hotkey-gate = Hotkey Button
+override-desc-hotkey-gate = Hold this for hotkeys, or Off for none.
+override-hotkey-fast-forward = Fast Forward
+override-hotkey-rewind = Rewind Hotkey
+override-hotkey-save-state = Save State
+override-hotkey-load-state = Load State
+override-hotkey-screenshot = Screenshot
+override-desc-hotkey = Needs the Hotkey Button held, if one is set.
+
+override-remap-a = Button A
+override-remap-b = Button B
+override-remap-x = Button X
+override-remap-y = Button Y
+override-remap-l = Button L
+override-remap-r = Button R
+override-remap-l2 = Button L2
+override-remap-r2 = Button R2
+override-desc-remap = What this button does in the game.
+
+override-button-a = A
+override-button-b = B
+override-button-x = X
+override-button-y = Y
+override-button-l = L
+override-button-r = R
+override-button-l2 = L2
+override-button-r2 = R2
+override-button-start = Start
+override-button-select = Select
+override-button-menu = Menu
 
 guide-button-search = Search
 guide-button-next = Next
