@@ -616,6 +616,30 @@ fn escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// wpa_supplicant's `wpa_state` for wlan0 -- `SCANNING`, `ASSOCIATING`, `4WAY_HANDSHAKE`,
+/// `COMPLETED` and so on -- or `None` if it cannot be asked. This is what turns "Connecting..."
+/// from a label into a diagnosis: how far the attempt gets says whether the network was found,
+/// the password accepted, or an address handed out.
+pub fn association_state() -> Option<String> {
+    #[cfg(not(feature = "miyoo"))]
+    {
+        None
+    }
+
+    #[cfg(feature = "miyoo")]
+    {
+        let output = std::process::Command::new("/customer/app/wpa_cli")
+            .args(["-i", "wlan0", "status"])
+            .output()
+            .ok()?;
+        let output = String::from_utf8(output.stdout).ok()?;
+        output
+            .lines()
+            .find_map(|line| line.strip_prefix("wpa_state="))
+            .map(|state| state.trim().to_string())
+    }
+}
+
 pub fn ip_address() -> Option<String> {
     #[cfg(feature = "miyoo")]
     {

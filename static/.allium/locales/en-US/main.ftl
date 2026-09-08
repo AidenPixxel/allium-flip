@@ -47,7 +47,14 @@ settings-wifi-ssh-enabled = SSH Enabled
 settings-wifi-ftp-enabled = FTP Enabled
 settings-wifi-scraper = Scraper
 settings-wifi-syncthing = Syncthing Enabled
-settings-wifi-connecting= Connecting...
+# The status row while there is no address. Progress for the first thirty seconds, then the
+# likeliest cause, judged by how far the attempt got. The radio is 2.4 GHz only.
+settings-wifi-searching = Searching...
+settings-wifi-connecting = Connecting...
+settings-wifi-getting-ip = Getting IP address...
+settings-wifi-network-not-found = Network not found
+settings-wifi-wrong-password = Wrong password?
+settings-wifi-no-ip = No IP address
 
 settings-clock = Date & Time
 settings-clock-datetime = Date & Time
