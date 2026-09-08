@@ -177,6 +177,13 @@ endif
 	rsync --progress --modify-window=1 --update --recursive --times --verbose --delete $(DIST_DIR)/.allium $(DIST_DIR)/.tmp_update $(DIST_DIR)/Apps $(DIST_DIR)/Themes $(SDCARD_PATH)/
 	@echo "Full deployment complete! Remember to eject your SD card properly."
 
+.PHONY: push
+push:
+ifndef DEVICE
+	$(error DEVICE is not set. Put DEVICE=192.168.x.x in local.mk, or pass it on the command line. The IP is on the handheld under Settings > Wi-Fi)
+endif
+	@scripts/push-update.sh "$(DEVICE)" $(ZIP)
+
 .PHONY: toolchain
 toolchain:
 	docker run --rm -it -v $(ROOT_DIR):/root/workspace $(TOOLCHAIN) bash

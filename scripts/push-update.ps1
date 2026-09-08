@@ -73,6 +73,25 @@ function Test-ZipIsWhole {
     }
 
     try {
+        # Read every entry through, which forces each deflate stream to be decoded and throws on
+        # corruption. Opening the archive alone only proves its index is intact -- this is the
+        # equivalent of `unzip -t`, so both scripts check the same thing.
+        try {
+            $buffer = New-Object byte[] 65536
+            foreach ($entry in $archive.Entries) {
+                if ($entry.Length -eq 0) { continue }
+                $stream = $entry.Open()
+                try {
+                    while ($stream.Read($buffer, 0, $buffer.Length) -gt 0) { }
+                } finally {
+                    $stream.Dispose()
+                }
+            }
+        } catch {
+            Write-Warning "Archive failed to read through: $($_.Exception.Message)"
+            return $false
+        }
+
         # An Allium build, not just any archive. Extracting something else over the SD root would
         # do real damage.
         #
