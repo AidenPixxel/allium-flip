@@ -77,31 +77,55 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # Also registers a problem matcher, so findings show as annotations on the commit
       - name: Install rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly
           components: clippy
-          profile: minimal
-          override: true
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
-      # The configuration the test job compiles
+      # The configuration the test job compiles. Output is kept for the comment below.
       - name: cargo clippy
-        run: cargo clippy -p common -p alliumd -p allium-launcher -p allium-menu -p myctl --all-targets -- -D warnings
+        run: cargo clippy -p common -p alliumd -p allium-launcher -p allium-menu -p myctl --all-targets -- -D warnings 2>&1 | tee clippy-host.log
 
       # The device configuration. Most of this fork's changes sit behind the miyoo feature, which
       # the test job never compiles, so this is the only place they are type-checked before the
-      # armv7 build -- and the only linting they get at all.
+      # armv7 build -- and the only linting they get at all. `always()` so a failure above does
+      # not hide this one.
       - name: cargo clippy (miyoo)
-        run: cargo clippy -p common -p alliumd -p allium-launcher -p allium-menu --all-targets --features common/miyoo,alliumd/miyoo,allium-launcher/miyoo,allium-menu/miyoo -- -D warnings
+        if: always()
+        run: cargo clippy -p common -p alliumd -p allium-launcher -p allium-menu --all-targets --features common/miyoo,alliumd/miyoo,allium-launcher/miyoo,allium-menu/miyoo -- -D warnings 2>&1 | tee clippy-miyoo.log
+
+      # The findings, as a comment on the commit. The job log needs a login to read and the
+      # problem-matcher annotations stop at ten; a commit comment on a public repository needs
+      # neither, which is what lets them be acted on from a machine that cannot run clippy.
+      - name: Post findings as a commit comment
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### clippy findings for ${GITHUB_SHA::7}"
+            for log in clippy-host.log clippy-miyoo.log; do
+              [ -f "$log" ] || continue
+              echo
+              echo "<details><summary>$log</summary>"
+              echo
+              echo '```'
+              grep -E '^(error|warning)|^\s+-->|^\s+= note: .*\[' "$log" | head -300
+              echo '```'
+              echo '</details>'
+            done
+          } > comment.md
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -F body=@comment.md \
+            || echo "could not post the comment"
 
   simulator:
     name: Build Simulator
     runs-on: ubuntu-latest
-    # Advisory: nothing has built the simulator since the fork, so it may not compile at all. This
+    # Advisory: nothing had built the simulator since the fork, so it may not compile at all. This
     # job exists to find out, and to notice when a change breaks it.
     continue-on-error: true
     steps:
@@ -109,11 +133,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          profile: minimal
-          override: true
+        uses: dtolnay/rust-toolchain@nightly
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
