@@ -1,11 +1,9 @@
-use std::fs::{self, File};
-
 use anyhow::Result;
-use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use strum::FromRepr;
 
 use crate::constants::ALLIUM_POWER_SETTINGS;
+use crate::state_file;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PowerSettings {
@@ -64,21 +62,39 @@ impl PowerSettings {
     }
 
     pub fn load() -> Result<Self> {
-        if ALLIUM_POWER_SETTINGS.exists() {
-            debug!("found state, loading from file");
-            let file = File::open(ALLIUM_POWER_SETTINGS.as_path())?;
-            if let Ok(json) = serde_json::from_reader(file) {
-                return Ok(json);
-            }
-            warn!("failed to read power file, removing");
-            fs::remove_file(ALLIUM_POWER_SETTINGS.as_path())?;
-        }
-        Ok(Self::new())
+        Ok(state_file::load(ALLIUM_POWER_SETTINGS.as_path(), "power").unwrap_or_else(Self::new))
     }
 
     pub fn save(&self) -> Result<()> {
-        let file = File::create(ALLIUM_POWER_SETTINGS.as_path())?;
-        serde_json::to_writer(file, &self)?;
-        Ok(())
+        state_file::save(ALLIUM_POWER_SETTINGS.as_path(), self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_power_files_still_parse() {
+        // A parse failure resets every power setting to its default (and used to delete the file
+        // outright), so a file written by another build has to keep deserializing -- including
+        // one carrying keys this build knows nothing about.
+        let legacy = r#"{
+            "power_button_action": "Suspend",
+            "lid_close_action": "Shutdown",
+            "auto_sleep_when_charging": false,
+            "auto_sleep_duration_minutes": 15
+        }"#;
+
+        let parsed: PowerSettings = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.auto_sleep_duration_minutes, 15);
+        assert!(!parsed.auto_sleep_when_charging);
+
+        let with_unknown_key = legacy.replace(
+            r#""auto_sleep_duration_minutes": 15"#,
+            r#""auto_sleep_duration_minutes": 15, "performance_mode": "Max""#,
+        );
+        let parsed: PowerSettings = serde_json::from_str(&with_unknown_key).unwrap();
+        assert_eq!(parsed.auto_sleep_duration_minutes, 15);
     }
 }

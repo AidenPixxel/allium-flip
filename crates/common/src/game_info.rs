@@ -10,6 +10,7 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{ALLIUM_GAME_INFO, ALLIUM_GAMES_DIR, ALLIUM_SCRIPTS_DIR};
+use crate::state_file;
 
 #[derive(Debug, Serialize, Deserialize)]
 /// Information about a game. Used to restore a game after a restart, and to calculate playtime.
@@ -84,29 +85,28 @@ impl GameInfo {
 
     /// Loads the current game info from file, if exists.
     pub fn load() -> Result<Option<Self>> {
-        Ok(if ALLIUM_GAME_INFO.exists() {
-            let file = File::open(ALLIUM_GAME_INFO.as_path())?;
-            let Ok(game_info) = serde_json::from_reader::<_, Self>(file) else {
-                fs::remove_file(ALLIUM_GAME_INFO.as_path())?;
-                return Ok(None);
-            };
-            if game_info.needs_swap() {
-                debug!("enabling swap");
-                Command::new(ALLIUM_SCRIPTS_DIR.join("swap-on.sh"))
-                    .spawn()?
-                    .wait()?;
-            }
-            Some(game_info)
-        } else {
-            None
-        })
+        // A file that does not parse is kept as current_game.bak rather than deleted: it used to
+        // be, and that silently dropped the game in progress on the first boot after an update.
+        Ok(
+            if let Some(game_info) =
+                state_file::load::<Self>(ALLIUM_GAME_INFO.as_path(), "game info")
+            {
+                if game_info.needs_swap() {
+                    debug!("enabling swap");
+                    Command::new(ALLIUM_SCRIPTS_DIR.join("swap-on.sh"))
+                        .spawn()?
+                        .wait()?;
+                }
+                Some(game_info)
+            } else {
+                None
+            },
+        )
     }
 
     /// Saves the current game info to file.
     pub fn save(&self) -> Result<()> {
-        let file = File::create(ALLIUM_GAME_INFO.as_path())?;
-        serde_json::to_writer(file, self)?;
-        Ok(())
+        state_file::save(ALLIUM_GAME_INFO.as_path(), self)
     }
 
     /// Deletes the current game info file.
@@ -132,6 +132,43 @@ impl GameInfo {
     /// Whether swap should be enabled.
     pub fn needs_swap(&self) -> bool {
         self.needs_swap
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_state_files_still_parse() {
+        // A parse failure loses the game in progress on the first boot after an update (and used
+        // to delete the state file too), so a file written by another build has to keep
+        // deserializing -- including one carrying keys this build knows nothing about.
+        let legacy = r#"{
+            "name": "Game One",
+            "path": "Roms/GBA/Game One.gba",
+            "core": "mgba",
+            "command": "/mnt/SDCARD/.allium/cores/retroarch/launch.sh",
+            "args": ["mgba", "Roms/GBA/Game One.gba"],
+            "has_menu": true,
+            "needs_swap": false,
+            "image": null,
+            "guides": [],
+            "start_time": "2026-01-01T00:00:00Z"
+        }"#;
+
+        let game_info: GameInfo = serde_json::from_str(legacy).unwrap();
+        assert_eq!(game_info.name, "Game One");
+
+        // Written by a build that had a per-game CPU speed setting. Nothing here opts out of
+        // serde's default, so the unknown key is ignored rather than failing the parse.
+        let with_unknown_key = legacy.replace(
+            r#""needs_swap": false,"#,
+            r#""needs_swap": false, "performance_mode": "Max","#,
+        );
+        let game_info: GameInfo = serde_json::from_str(&with_unknown_key).unwrap();
+        assert_eq!(game_info.name, "Game One");
     }
 }
 
