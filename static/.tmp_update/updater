@@ -56,7 +56,12 @@ fi
 
 # check for OTA update
 if [ -f "$ROOT/allium-ota.zip" ]; then
-    "$ROOT/.allium/scripts/ota-update.sh"
+    # Run from tmpfs, not from the card: the extract overwrites this very script, and
+    # busybox sh reads a script incrementally by byte offset -- so a copy running from the
+    # card can resume part-way into the newly written bytes. A copy on tmpfs cannot be
+    # rewritten underneath the interpreter.
+    cp "$ROOT/.allium/scripts/ota-update.sh" /tmp/ota-update.sh
+    sh /tmp/ota-update.sh
 fi
 
 # perform model-specific logic
