@@ -215,91 +215,16 @@ ingame-menu-quit = Quit
 ingame-menu-slot = Slot { $slot }
 ingame-menu-slot-auto = Auto
 ingame-menu-disk = Disk { $disk }
-ingame-menu-controls = Controls
-ingame-menu-options = Options
-
-# Per-game / per-console / per-core RetroArch overrides. These strings sit in a one-line strip in
-# the in-game menu, which has no frame timer and so cannot scroll -- keep them short enough to fit.
-override-apply = Apply Now
-override-scope = Applies To
-override-scope-game = This Game
-override-scope-console = This Console
-override-scope-core = This Core
-override-desc-scope = Which games these settings apply to.
-override-default = Default
-override-on = On
-override-off = Off
-
-override-performance = Performance
-override-desc-performance = CPU speed. Always this game only.
-override-scaling = Scaling
-override-desc-scaling = How the picture is stretched to the screen.
-override-scaling-bicubic = Bicubic
-override-scaling-bilinear = Bilinear
-override-scaling-nearest = Nearest
-override-integer-scale = Integer Scale
-override-desc-integer-scale = Whole pixels only. Smaller, but crisp.
-override-screen-filter = Screen Filter
-override-desc-screen-filter = Grid and scanline looks. Costs some speed.
-override-filter-scanline = Scanlines
-override-filter-lcd = LCD
-override-filter-dot-matrix = Dot Matrix
-override-filter-dmg = DMG Grid
-override-ff-frameskip = Fast Forward Skip
-override-desc-ff-frameskip = Drops frames so fast forward is really fast.
-override-audio-latency = Audio Delay
-override-desc-audio-latency = Lower is tighter, but can crackle.
-override-latency-32 = 32 ms
-override-latency-64 = 64 ms
-override-latency-128 = 128 ms
-override-aspect-ratio = Aspect Ratio
-override-desc-aspect-ratio = Stretch to fill, or keep the shape.
-override-aspect-ratio-keep = Keep Aspect
-override-aspect-ratio-full = Full Screen
-override-auto-save = Auto Save on Exit
-override-desc-auto-save = Save your place when the game closes.
-override-auto-load = Auto Load on Launch
-override-desc-auto-load = Resume where you left off.
-override-fast-forward-ratio = Fast Forward Speed
-override-desc-fast-forward-ratio = How fast Fast Forward runs.
-override-ratio-2x = 2x
-override-ratio-4x = 4x
-override-ratio-unlimited = Unlimited
-override-show-fps = Show FPS
-override-desc-show-fps = Draw a frame counter over the game.
-override-rewind = Rewind
-override-desc-rewind = Costs memory and speed even unused.
-
-override-hotkey-gate = Hotkey Button
-override-desc-hotkey-gate = Hold this for hotkeys, or Off for none.
-override-hotkey-fast-forward = Fast Forward
-override-hotkey-rewind = Rewind Hotkey
-override-hotkey-save-state = Save State
-override-hotkey-load-state = Load State
-override-hotkey-screenshot = Screenshot
-override-desc-hotkey = Needs the Hotkey Button held, if one is set.
-
-override-remap-a = Button A
-override-remap-b = Button B
-override-remap-x = Button X
-override-remap-y = Button Y
-override-remap-l = Button L
-override-remap-r = Button R
-override-remap-l2 = Button L2
-override-remap-r2 = Button R2
-override-desc-remap = What this button does in the game.
-
-override-button-a = A
-override-button-b = B
-override-button-x = X
-override-button-y = Y
-override-button-l = L
-override-button-r = R
-override-button-l2 = L2
-override-button-r2 = R2
-override-button-start = Start
-override-button-select = Select
-override-button-menu = Menu
+ingame-menu-performance = Speed
+# Values for the per-game speed row. Short on purpose: the save-state thumbnail leaves this
+# list 271px wide, so the label is capped at 164px and a long value overlaps it. The full
+# names, with clock speeds, are on Settings > Power.
+ingame-menu-performance-default = Default
+ingame-menu-performance-powersave = Eco
+ingame-menu-performance-low = Low
+ingame-menu-performance-medium = Med
+ingame-menu-performance-high = High
+ingame-menu-performance-max = Max
 
 guide-button-search = Search
 guide-button-next = Next

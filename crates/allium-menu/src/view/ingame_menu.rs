@@ -9,18 +9,17 @@ use async_trait::async_trait;
 use base32::encode;
 use common::battery::Battery;
 use common::command::Command;
-use common::constants::{
-    ALLIUM_MENU_STATE, ALLIUM_SCREENSHOTS_DIR, RELAUNCH_MARKER, SAVE_STATE_IMAGE_WIDTH,
-};
+use common::constants::{ALLIUM_MENU_STATE, ALLIUM_SCREENSHOTS_DIR, SAVE_STATE_IMAGE_WIDTH};
+use common::database::Database;
 use common::display::Display;
 use common::game_info::GameInfo;
 use common::geom::{Alignment, Point, Rect};
 use common::locale::Locale;
+use common::performance::{self, PerformanceMode};
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
+use common::power::PowerSettings;
 use common::resources::Resources;
 use common::retroarch::RetroArchCommand;
-use common::retroarch_config;
-use common::retroarch_options::{self, Overrides};
 use common::stylesheet::Stylesheet;
 use common::view::{
     ButtonHint, ButtonHints, Image, ImageMode, Label, NullView, SettingsList, StatusBar, View,
@@ -32,7 +31,6 @@ use tokio::sync::mpsc::Sender;
 
 use crate::retroarch_info::RetroArchInfo;
 use crate::view::guide_selector::GuideSelector;
-use crate::view::override_settings::OverrideSettings;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct IngameMenuState {
@@ -51,18 +49,40 @@ where
     status_bar: StatusBar<B>,
     menu: SettingsList,
     guide_selector: Option<GuideSelector>,
-    /// The Controls or Options screen, while one is open. Both are the same view with a different
-    /// table of rows.
-    override_settings: Option<OverrideSettings>,
-    /// The libretro core basename, taken from the launch arguments, which is what resolves the
-    /// core's override directory.
-    libretro_core: Option<String>,
     button_hints: ButtonHints<String>,
     entries: Vec<MenuEntry>,
     retroarch_info: Option<RetroArchInfo>,
     path: PathBuf,
+    /// This game's performance mode, where `None` follows the global default from Settings.
+    performance_mode: Option<PerformanceMode>,
     image: Image,
     _phantom_battery: PhantomData<B>,
+}
+
+/// The per-game options, slowest first, in the order Left and Right move through them.
+///
+/// `System` is deliberately absent: "leave the CPU alone" is what the global default is for, and
+/// `None` here means "follow it". Short names only -- the row title takes two thirds of the width,
+/// so the frequencies shown in Settings would not fit beside it.
+const PERFORMANCE_MODES: [Option<PerformanceMode>; 6] = [
+    None,
+    Some(PerformanceMode::Powersave),
+    Some(PerformanceMode::Low),
+    Some(PerformanceMode::Medium),
+    Some(PerformanceMode::High),
+    Some(PerformanceMode::Max),
+];
+
+/// Locale key naming a per-game performance mode.
+fn performance_mode_key(mode: Option<PerformanceMode>) -> &'static str {
+    match mode {
+        None | Some(PerformanceMode::System) => "ingame-menu-performance-default",
+        Some(PerformanceMode::Powersave) => "ingame-menu-performance-powersave",
+        Some(PerformanceMode::Low) => "ingame-menu-performance-low",
+        Some(PerformanceMode::Medium) => "ingame-menu-performance-medium",
+        Some(PerformanceMode::High) => "ingame-menu-performance-high",
+        Some(PerformanceMode::Max) => "ingame-menu-performance-max",
+    }
 }
 
 impl<B> IngameMenu<B>
@@ -130,20 +150,7 @@ where
             + styles.ui.margin_y / 2;
         let content_height = (button_hints_rect.y - content_top) as u32;
 
-        // The libretro core name is the first launch argument, which is the only place the menu
-        // can get it: `ConsoleMapper` lives in the launcher and is not in this process's
-        // resources, so `cores.toml` is unreachable from here.
-        let has_overrides = game_info
-            .args
-            .first()
-            .and_then(|core| retroarch_config::core_name(core))
-            .is_some();
-
-        let entries = MenuEntry::entries(
-            retroarch_info.as_ref(),
-            !game_info.guides.is_empty(),
-            has_overrides,
-        );
+        let entries = MenuEntry::entries(retroarch_info.as_ref(), !game_info.guides.is_empty());
         let mut menu = SettingsList::new(
             res.clone(),
             Rect::new(
@@ -166,14 +173,33 @@ where
             let mut map = HashMap::new();
             map.insert("disk".into(), (info.disk_slot + 1).into());
             menu.set_right(
-                MenuEntry::Continue.index(
-                    retroarch_info.as_ref(),
-                    !game_info.guides.is_empty(),
-                    has_overrides,
-                ),
+                MenuEntry::Continue.index(retroarch_info.as_ref(), !game_info.guides.is_empty()),
                 Box::new(Label::new(
                     Point::zero(),
                     locale.ta("ingame-menu-disk", &map),
+                    Alignment::Right,
+                    None,
+                )),
+            );
+        }
+
+        // Kept on screen whether or not the row is highlighted, so the mode a game is running at
+        // is visible at a glance. Unlike the slot rows, nothing clears it on navigation.
+        let performance_mode = match res.get::<Database>().get_performance_mode(&game_info.path) {
+            // A stored `System` is normalised away, matching `performance_mode_key`
+            Ok(Some(PerformanceMode::System)) | Ok(None) => None,
+            Ok(mode) => mode,
+            Err(err) => {
+                warn!("could not read the performance mode: {err}");
+                None
+            }
+        };
+        if let Some(index) = entries.iter().position(|e| *e == MenuEntry::Performance) {
+            menu.set_right(
+                index,
+                Box::new(Label::new(
+                    Point::zero(),
+                    locale.t(performance_mode_key(performance_mode)),
                     Alignment::Right,
                     None,
                 )),
@@ -230,7 +256,6 @@ where
         }
 
         let path = game_info.path.clone();
-        let libretro_core = game_info.args.first().cloned();
 
         drop(game_info);
         drop(locale);
@@ -243,12 +268,11 @@ where
             status_bar,
             menu,
             guide_selector,
-            override_settings: None,
-            libretro_core,
             button_hints,
             entries,
             retroarch_info,
             path,
+            performance_mode,
             image,
             _phantom_battery: PhantomData,
         }
@@ -354,18 +378,17 @@ where
                     ));
                 }
             }
-            MenuEntry::Controls => self.open_overrides(retroarch_options::CONTROLS),
-            MenuEntry::Options => self.open_overrides(retroarch_options::OPTIONS),
+            MenuEntry::Performance => {
+                // Wraps, unlike Left/Right, so A alone can reach every option -- the button hint
+                // says "Select", and Left/Right is not otherwise advertised anywhere.
+                self.cycle_performance_mode(1, true);
+            }
             MenuEntry::Settings => {
                 RetroArchCommand::Unpause.send().await?;
                 RetroArchCommand::MenuToggle.send().await?;
                 commands.send(Command::Exit).await?;
             }
             MenuEntry::Quit => {
-                // Quit means the launcher, so drop any relaunch the override screens asked for --
-                // otherwise a request whose own quit never landed would fire on this one instead.
-                let _ = fs::remove_file(RELAUNCH_MARKER);
-
                 if self.retroarch_info.is_some() {
                     let core = self.res.get::<GameInfo>().core.to_owned();
                     commands
@@ -392,41 +415,58 @@ where
         Ok(true)
     }
 
-    /// Opens an override screen over the menu body, filling the same band the guide selector uses.
+    /// Moves the performance mode `delta` steps and puts the result into effect.
     ///
-    /// Silently does nothing when the core's override directory cannot be resolved -- but the rows
-    /// that call this are not offered in that case, so it should be unreachable.
-    fn open_overrides(&mut self, settings: &'static [retroarch_options::Setting]) {
-        let Some(core) = self.libretro_core.as_deref() else {
-            return;
+    /// Applied straight away rather than when the menu closes: the whole point of setting this
+    /// while playing is to feel the difference immediately. It is written to the database, so the
+    /// game remembers it next time, *and* to the state file, because a resume re-applies whatever
+    /// the state file says and would otherwise undo the change.
+    fn cycle_performance_mode(&mut self, delta: i32, wrap: bool) {
+        let len = PERFORMANCE_MODES.len() as i32;
+        let current = PERFORMANCE_MODES
+            .iter()
+            .position(|mode| *mode == self.performance_mode)
+            .unwrap_or(0) as i32;
+        let next = if wrap {
+            (current + delta).rem_euclid(len)
+        } else {
+            (current + delta).clamp(0, len - 1)
         };
-        let Some(overrides) = Overrides::new(core, self.path.clone()) else {
-            warn!("no override directory for {core}, not opening the screen");
+        if next == current {
             return;
-        };
+        }
+        self.performance_mode = PERFORMANCE_MODES[next as usize];
 
-        let styles = self.res.get::<Stylesheet>();
-        let status_bar_rect = self.status_bar.bounding_box(&styles);
-        let button_hints_rect = self.button_hints.bounding_box(&styles);
-        let content_top = self.rect.y
-            + styles.ui.margin_y
-            + styles.ui.ui_font.size.max(status_bar_rect.h) as i32
-            + styles.ui.margin_y / 2;
-        // Same band the guide selector fills: below the title and status bar, down to the hints
-        let rect = Rect::new(
-            self.rect.x,
-            content_top,
-            self.rect.w,
-            (button_hints_rect.y - content_top) as u32,
-        );
-        drop(styles);
+        let effective = self
+            .performance_mode
+            .unwrap_or_else(|| PowerSettings::load().unwrap_or_default().performance_mode);
+        performance::apply(effective);
 
-        self.override_settings = Some(OverrideSettings::new(
-            rect,
-            self.res.clone(),
-            settings,
-            overrides,
-        ));
+        if let Err(err) = self
+            .res
+            .get::<Database>()
+            .set_performance_mode(&self.path, self.performance_mode)
+        {
+            warn!("could not save the performance mode: {err}");
+        }
+        if let Err(err) = GameInfo::store_performance_mode(effective) {
+            warn!("could not record the performance mode for resume: {err}");
+        }
+
+        let text = self
+            .res
+            .get::<Locale>()
+            .t(performance_mode_key(self.performance_mode));
+        if let Some(index) = self
+            .entries
+            .iter()
+            .position(|e| *e == MenuEntry::Performance)
+        {
+            self.menu.set_right(
+                index,
+                Box::new(Label::new(Point::zero(), text, Alignment::Right, None)),
+            );
+        }
     }
 
     fn update_state_slot_label(&mut self, state_slot: i8) {
@@ -502,8 +542,6 @@ where
         drawn |= self.status_bar.should_draw() && self.status_bar.draw(display, styles)?;
         if let Some(selector) = &mut self.guide_selector {
             drawn |= selector.should_draw() && selector.draw(display, styles)?;
-        } else if let Some(overrides) = &mut self.override_settings {
-            drawn |= overrides.should_draw() && overrides.draw(display, styles)?;
         } else {
             drawn |= self.menu.should_draw() && self.menu.draw(display, styles)?;
             drawn |= self.image.should_draw() && self.image.draw(display, styles)?;
@@ -526,8 +564,6 @@ where
             || self.status_bar.should_draw()
             || if let Some(selector) = &self.guide_selector {
                 selector.should_draw()
-            } else if let Some(overrides) = &self.override_settings {
-                overrides.should_draw()
             } else {
                 self.menu.should_draw()
                     || self.image.should_draw()
@@ -540,8 +576,6 @@ where
         self.status_bar.set_should_draw();
         if let Some(selector) = &mut self.guide_selector {
             selector.set_should_draw();
-        } else if let Some(overrides) = &mut self.override_settings {
-            overrides.set_should_draw();
         } else {
             self.menu.set_should_draw();
             self.image.set_should_draw();
@@ -576,25 +610,23 @@ where
             return Ok(true);
         }
 
-        if let Some(overrides) = &mut self.override_settings
-            && overrides
-                .handle_key_event(event, commands.clone(), bubble)
-                .await?
-        {
-            bubble.retain(|cmd| match cmd {
-                Command::CloseView => {
-                    // Nothing to flush: the screen writes each choice straight to disk as it is
-                    // committed, because the menu discards its whole view tree between sessions.
-                    self.override_settings = None;
-                    self.set_should_draw();
-                    false
-                }
-                _ => true,
-            });
-            return Ok(true);
-        }
-
         let selected = self.menu.selected();
+
+        // Handle performance mode selection. Keyed off the entry rather than a discriminant,
+        // because this row's index moves with the guide row and with which core is running.
+        if self.entries.get(selected) == Some(&MenuEntry::Performance) {
+            match event {
+                KeyEvent::Pressed(Key::Left) | KeyEvent::Autorepeat(Key::Left) => {
+                    self.cycle_performance_mode(-1, false);
+                    return Ok(true);
+                }
+                KeyEvent::Pressed(Key::Right) | KeyEvent::Autorepeat(Key::Right) => {
+                    self.cycle_performance_mode(1, false);
+                    return Ok(true);
+                }
+                _ => {}
+            }
+        }
 
         // Handle disk slot selection
         if let Some(ref mut info) = self.retroarch_info {
@@ -722,8 +754,6 @@ where
         let mut children: Vec<&dyn View> = vec![&self.name, &self.status_bar, &self.button_hints];
         if let Some(selector) = &self.guide_selector {
             children.push(selector);
-        } else if let Some(overrides) = &self.override_settings {
-            children.push(overrides);
         } else {
             children.push(&self.menu);
             children.push(&self.image);
@@ -736,8 +766,6 @@ where
             vec![&mut self.name, &mut self.status_bar, &mut self.button_hints];
         if let Some(selector) = &mut self.guide_selector {
             children.push(selector);
-        } else if let Some(overrides) = &mut self.override_settings {
-            children.push(overrides);
         } else {
             children.push(&mut self.menu);
             children.push(&mut self.image);
@@ -764,12 +792,11 @@ pub enum MenuEntry {
     Guide,
     Settings,
     Quit,
-    /// Declared last on purpose, along with everything below it. `handle_key_event` compares row
-    /// indices against `MenuEntry::Continue as usize` and friends, which only works while
-    /// Continue, Save and Load keep discriminants 0, 1 and 2 -- inserting a variant above them
-    /// would silently repoint the disk and save-state slot rows.
-    Controls,
-    Options,
+    /// Declared last on purpose. `handle_key_event` compares row indices against
+    /// `MenuEntry::Continue as usize` and friends, which only works while Continue, Save and Load
+    /// keep discriminants 0, 1 and 2 -- inserting a variant above them would silently repoint the
+    /// disk and save-state slot rows.
+    Performance,
 }
 
 impl MenuEntry {
@@ -782,19 +809,14 @@ impl MenuEntry {
             MenuEntry::Guide => locale.t("ingame-menu-guide"),
             MenuEntry::Settings => locale.t("ingame-menu-settings"),
             MenuEntry::Quit => locale.t("ingame-menu-quit"),
-            MenuEntry::Controls => locale.t("ingame-menu-controls"),
-            MenuEntry::Options => locale.t("ingame-menu-options"),
+            MenuEntry::Performance => locale.t("ingame-menu-performance"),
         }
     }
 
-    fn entries(info: Option<&RetroArchInfo>, has_guides: bool, has_overrides: bool) -> Vec<Self> {
-        // Controls and Options sit after Guide in every arm, and are dropped entirely when the
-        // core's override directory cannot be worked out, since there would be nowhere to write
-        // what they collect. They stay clear of Continue, Save and Load so navigating to them
-        // never collides with the index arithmetic those rows do.
-        static OVERRIDE_ROWS: [MenuEntry; 2] = [MenuEntry::Controls, MenuEntry::Options];
-        let overrides: &[MenuEntry] = if has_overrides { &OVERRIDE_ROWS } else { &[] };
-
+    fn entries(info: Option<&RetroArchInfo>, has_guides: bool) -> Vec<Self> {
+        // Performance sits after Guide in every arm -- it applies to any core, not just
+        // RetroArch -- and stays clear of Continue, Save and Load so navigating to it never
+        // collides with the index arithmetic those rows do.
         match info {
             Some(RetroArchInfo {
                 state_slot: Some(_),
@@ -804,8 +826,12 @@ impl MenuEntry {
                 if has_guides {
                     entries.push(MenuEntry::Guide);
                 }
-                entries.extend_from_slice(overrides);
-                entries.extend([MenuEntry::Settings, MenuEntry::Reset, MenuEntry::Quit]);
+                entries.extend([
+                    MenuEntry::Performance,
+                    MenuEntry::Settings,
+                    MenuEntry::Reset,
+                    MenuEntry::Quit,
+                ]);
                 entries
             }
             Some(_) => {
@@ -813,8 +839,7 @@ impl MenuEntry {
                 if has_guides {
                     entries.push(MenuEntry::Guide);
                 }
-                entries.extend_from_slice(overrides);
-                entries.extend([MenuEntry::Settings, MenuEntry::Quit]);
+                entries.extend([MenuEntry::Performance, MenuEntry::Settings, MenuEntry::Quit]);
                 entries
             }
             None => {
@@ -822,15 +847,14 @@ impl MenuEntry {
                 if has_guides {
                     entries.push(MenuEntry::Guide);
                 }
-                entries.extend_from_slice(overrides);
-                entries.push(MenuEntry::Quit);
+                entries.extend([MenuEntry::Performance, MenuEntry::Quit]);
                 entries
             }
         }
     }
 
-    fn index(&self, info: Option<&RetroArchInfo>, has_guides: bool, has_overrides: bool) -> usize {
-        let entries = MenuEntry::entries(info, has_guides, has_overrides);
+    fn index(&self, info: Option<&RetroArchInfo>, has_guides: bool) -> usize {
+        let entries = MenuEntry::entries(info, has_guides);
         entries.iter().position(|e| e == self).unwrap_or(0)
     }
 }
