@@ -134,18 +134,6 @@ guide-button-search = Cerca
 guide-button-next = Successivo
 guide-button-prev = Precedente
 
-# Hotkeys
-hotkeys-global = Pulsanti Globali
-hotkeys-screenshot = Screenshot
-hotkeys-volume-down = Volume -
-hotkeys-volume-up = Volume +
-hotkeys-brightness-down = Luminosità -
-hotkeys-brightness-up = Luminosità +
-
-hotkeys-ingame = Pulsanti in Gioco:
-hotkeys-toggle-aspect-ratio = Proporzioni ON/OFF
-hotkeys-toggle-fps = FPS ON/OFF
-
 # Common
 button-back = Indietro
 button-confirm = OK

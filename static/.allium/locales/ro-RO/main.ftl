@@ -134,18 +134,6 @@ guide-button-search = Căutare
 guide-button-next = Următorul
 guide-button-prev = Anterior
 
-# Hotkeys
-hotkeys-global = Hotkey-uri Globale:
-hotkeys-screenshot = Captură de ecran
-hotkeys-volume-down = Volum -
-hotkeys-volume-up = Volum +
-hotkeys-brightness-down = Luminozitate -
-hotkeys-brightness-up = Luminozitate +
-
-hotkeys-ingame = Hotkey-uri în Joc:
-hotkeys-toggle-aspect-ratio = Comută Raportul de Aspect
-hotkeys-toggle-fps = Comută FPS
-
 # Common
 button-back = Înapoi
 button-confirm = Confirmă

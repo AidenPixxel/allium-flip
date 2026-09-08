@@ -135,18 +135,6 @@ guide-button-search = Buscar
 guide-button-next = Siguiente
 guide-button-prev = Anterior
 
-# Hotkeys
-hotkeys-global = Teclas Acceso Rápido:
-hotkeys-screenshot = Pantallazo
-hotkeys-volume-down = Volumen -
-hotkeys-volume-up = Volumen +
-hotkeys-brightness-down = Brillo -
-hotkeys-brightness-up = Brillo +
-
-hotkeys-ingame = Teclas Acceso Rápido en el Juego:
-hotkeys-toggle-aspect-ratio = Cambiar Relación de Aspecto
-hotkeys-toggle-fps = FPS
-
 # Common
 button-back = Volver
 button-confirm = Confirmar

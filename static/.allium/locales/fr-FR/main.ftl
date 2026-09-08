@@ -134,18 +134,6 @@ guide-button-search = Rechercher
 guide-button-next = Suivant
 guide-button-prev = Précédent
 
-# Hotkeys
-hotkeys-global = Raccourcis globaux:
-hotkeys-screenshot = Capture d'écran
-hotkeys-volume-down = Volume -
-hotkeys-volume-up = Volume +
-hotkeys-brightness-down = Luminosité -
-hotkeys-brightness-up = Luminosité +
-
-hotkeys-ingame = Raccourcis en jeu:
-hotkeys-toggle-aspect-ratio = Changer l'aspect
-hotkeys-toggle-fps = Afficher les FPS
-
 # Common
 button-back = Retour
 button-confirm = Confirmer

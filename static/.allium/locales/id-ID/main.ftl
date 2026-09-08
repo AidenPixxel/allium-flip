@@ -133,18 +133,6 @@ guide-button-search = Cari
 guide-button-next = Selanjutnya
 guide-button-prev = Sebelumnya
 
-# Hotkeys
-hotkeys-global = Pintasan tombol Umum:
-hotkeys-screenshot = Tangkap layar
-hotkeys-volume-down = Volume -
-hotkeys-volume-up = Volume +
-hotkeys-brightness-down = Kecerahan -
-hotkeys-brightness-up = Kecerahan +
-
-hotkeys-ingame = Pintasan saat main gim:
-hotkeys-toggle-aspect-ratio = Ganti skala layar
-hotkeys-toggle-fps = Tampilkan FPS
-
 # Common
 button-back = Kembali
 button-confirm = Oke

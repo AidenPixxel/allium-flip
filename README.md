@@ -1,192 +1,112 @@
-# Allium
+# Allium Flip
 
-> This is a personal fork of [Allium](https://github.com/goweiwen/Allium) by Wei Wen Goh, with
-> modifications for the Miyoo Mini Flip. The upstream commit history is not preserved here; see
-> the original repository for it. Allium is MIT licensed — see [LICENSE](LICENSE).
+A personal fork of [Allium](https://github.com/goweiwen/Allium), by Wei Wen Goh and contributors,
+for the **Miyoo Mini Flip**. Allium is a custom launcher for the Miyoo Mini family, in the spirit of
+[OnionOS](https://github.com/OnionUI/Onion) and [MiniUI](https://github.com/shauninman/MiniUI).
 
-[![Discord](https://img.shields.io/discord/1442105622320513137?style=flat&logo=discord&logoColor=white&label=Discord)](https://discord.gg/eSvVqe6c8n)
+This fork is trimmed to what one Flip needs and adds a handful of things on top. The upstream commit
+history is not preserved; see the original repository for it. Allium is MIT licensed — see
+[LICENSE](LICENSE).
 
-Allium is a custom launcher for the Miyoo Mini, Miyoo Mini Plus, and Miyoo Mini Flip handheld devices, similar to [OnionOS](https://github.com/OnionUI/Onion) and [MiniUI](https://github.com/shauninman/MiniUI).
+## How this differs from upstream
 
-## Project Goals
+- **Flip only.** The core set is trimmed to the consoles actually used; the stock/Onion card layout
+  is still honoured.
+- **Per-game CPU speed.** Six governor presets, set from the in-game menu's **Speed** row and applied
+  instantly; the global default is under Settings → Power.
+- **Display profiles**, replacing night mode: named warmth and dimness presets, cycled with
+  Menu + Select, applied in the display controller so they cover games too.
+- **Power**: what happens when a charger wakes a powered-off device (charge screen, charge silently,
+  or stay off), and how long suspend lasts before powering off.
+- **Updates over Wi-Fi**, no SD card: from the handheld's own Settings → System Update, or pushed
+  from a computer — see [UPDATING.md](UPDATING.md).
+- Hardening you will not see: settings files survive a bad write, the daemon survives a crashing
+  launcher, Wi-Fi comes up with one supplicant, and LAN services start without internet access.
 
-The goal of Allium is to replace MainUI (stock UI) with a faster and more user-friendly UI.
-- Fast
-- Clean, user-friendly UI
-- RetroArch (with Netplay, achievements)
-- Box art
-- Support running on both Miyoo Mini, Miyoo Mini Plus, and Miyoo Mini Flip without changes
-
-## Help and Documentation
-
-Please refer to this README.md and the [Wiki](https://github.com/goweiwen/Allium/wiki) for information on how to setup and use Allium.
-
-[<img width="250" height="250" alt="icons8-book-250" src="https://github.com/user-attachments/assets/c643a3e2-834d-4377-9b7a-0aa879e86ea7" />](https://github.com/goweiwen/Allium/wiki)
-
-
-# Screenshots
-
-<div>
-    <img alt="Main menu" src="assets/screenshots/main-menu.png" width="49%">
-    <img alt="Recents carousel" src="assets/screenshots/recents-carousel.png" width="49%">
-    <img alt="Ingame menu" src="assets/screenshots/ingame-menu.png" width="49%">
-    <img alt="Guide" src="assets/screenshots/guide.png" width="49%">
-    <img alt="Settings" src="assets/screenshots/settings.png" width="49%">
-    <img alt="Themes" src="assets/screenshots/themes.png" width="49%">
-    <img alt="Localization" src="assets/screenshots/localization.png" width="49%">
-</div>
+See [CHANGELOG.md](CHANGELOG.md) for what each release changed.
 
 ## Installation
 
-Allium supports both the Miyoo Mini, Miyoo Mini Plus,and Miyoo Mini Flip on the same SD card.
-
-[Check out the wiki page for a more detailed set of instructions.](https://github.com/goweiwen/Allium/wiki/1.-Installation-Instructions)
-
-### First Install
+### First install
 1. Format the SD card to [FAT32](https://github.com/anzz1/DotUI-X/wiki/fat32format).
-2. Download the latest release and extract into your SD card. e.g. `E:/`.
-3. Eject the disk (**important!**).
+2. Download the latest [release](https://github.com/AidenPixxel/allium-flip/releases/latest) and
+   extract it onto the card, e.g. `E:/`.
+3. Eject the card properly.
 
 ### Updating
-
-No need to format — an update only replaces a few folders. See [UPDATING.md](UPDATING.md) for the
-Wi-Fi route, which needs no SD card at all.
-
-1. Download the latest release and extract these folders into your SD card. e.g. `E:/`:
-    - .allium
-    - .tmp_update
-    - Apps
-    - RetroArch
-3. Eject the disk (**important!**).
+You never need to format again. See [UPDATING.md](UPDATING.md): from the handheld's System Update
+screen, pushed over Wi-Fi from a computer, or by card.
 
 ## Features
-- Supports stock/Onion/DotUI SD card layout
-- Works without configuration
-- Box art (250px wide, PNG, JPG, GIF)
-- Supports gameslist.xml with nested folders
-- Favorites
-- Recents list (sort by last played or playtime)
-- Alternative recents view with save-state screenshot previews
-- Search games by name
-- Activity tracker
-- [RetroArch for all supported cores](https://github.com/goweiwen/Allium/wiki/Console-Mapper)
-- Volume & Brightness (menu + l/r/u/d) control
-- Night mode: warm, dimmed screen for playing in the dark (menu + select), applied in the display controller so it covers games too
-- Configurable behaviour when plugged in while powered off (charging screen, charge silently, or stay off)
-- In-game menu (save & load with screenshots, reset, access RetroArch menu, [guide](https://github.com/goweiwen/Allium/wiki/In-game-Guide-Walkthrough-Reader), disk changer, quit)
-- Automatic resume when powering off/on
-- Suspend
-- Settings page
-    - OTA update
-    - WiFi (IP Address, NTP, Telnet, FTP, SyncThing)
-    - Date, time, timezone
-    - Change LCD settings
-    - Customize theme colours, font
-    - Change system language
-- Theme manager
-    - Built-in themes
 
-## Planned Features
-(roughly in order of priority)
-- Metadata/box art scraper
+- Stock / Onion / DotUI card layout, no configuration needed
+- Box art (250 px wide, PNG, JPG, GIF); `gameslist.xml` with nested folders
+- Favorites; recents by last played or playtime, with save-state previews; search
 - Activity tracker
-    - Track play sessions using RTC
-- Battery history
-- UI improvements:
-    - Folder icon
-    - Volume indicator
-    - Brightness indicator
-    - Error toast (e.g. no core found for game)
-- Seamless netplay from ingame menu
+- RetroArch for every core, with per-game core selection
+- Volume and brightness on Menu + L/R/U/D, with an on-screen indicator
+- Display profiles (Menu + Select) and per-game CPU speed
+- In-game menu: save and load with screenshots, Speed, Emulator (RetroArch's own menu),
+  [guides](https://github.com/goweiwen/Allium/wiki/In-game-Guide-Walkthrough-Reader), disk changer,
+  reset, quit
+- Resume where you left off after a power cycle; suspend; configurable charger-wake behaviour
+- Settings: System Update; Wi-Fi with file server, FTP, SSH, telnet, syncthing and NTP; clock and
+  timezone; power; display; theme; language
 
 ## Development
 
-Allium comes with a simulator that can be used for development.
-
 ### Requirements
-1. `make`, `cargo`, `zip`, `clang` (`libclang-dev`), `patchelf`
-3. [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild) and `zig`: `pip install cargo-zigbuild`
-
-On Mac, quick set up with:
-
-```
-./scripts/setup-mac.sh
-```
+`make`, nightly `cargo`, `zip`, `clang` (`libclang-dev`), `patchelf`, and
+[cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild) with `zig`.
 
 ### Architecture
-Allium is split into several binaries:
-- `alliumd` (daemon that handles launcher/game/menu launching, vol/brightness hotkeys, poweroff)
-- `allium-launcher` (main menu, including games, recents, settings)
-- `allium-menu` (ingame menu, including guide reader)
-- `activity-tracker` (gui for looking at game activity/playtime)
-- `screenshot`
-- `say` (draws text onto the screen, using Allium's theme settings and exits)
-- `show` (draws an image to screen, or darkens the screen and exits)
-- `show-hotkeys` (draws a list of hotkeys onto the screen and exits)
-- `myctl` (manipulates hardware like volume. This relies on the MM's proprietary libraries.)
-
-Shared code is located in the `common` crate.
+- `alliumd` — the daemon. Owns input, launches the launcher, game and menu, handles the volume and
+  brightness hotkeys and their on-screen indicator, power and suspend. If it exits the boot script
+  reboots the device, so it is written not to.
+- `allium-launcher` — the main menu: games, recents, settings.
+- `allium-menu` — the in-game menu, run as a thread inside `alliumd`.
+- `activity-tracker`, `screenshot-viewer` — apps under `Apps/`.
+- `screenshot`, `say`, `show` — small tools used by the boot script and the hotkeys.
+- `myctl` — hardware control (volume, display) through the Miyoo proprietary libraries, via `ffi`.
+- `common` — everything shared.
 
 ### Simulator
-There is no simulator for `alliumd` (no UI, only logic).
 ```
-# Run main menu (allium-launcher)
 make simulator bin=allium-launcher
-
-# Run ingame menu (allium-menu)
 make simulator bin=allium-menu
 ```
+There is none for `alliumd`. CI builds the simulator to catch breakage but does not run it.
 
-### Building
+### Building and CI
+`make all` builds Allium and RetroArch and assembles `dist/`. CI runs `cargo fmt --check`, the tests,
+clippy in both the host and `miyoo` configurations, and `cargo deny`. A push to `main` that builds
+publishes a release tagged `v<version>-flip.<run>`; the format check and tests gate the build, and
+clippy is advisory until its first clean run.
 
-Running `make` will build Allium and RetroArch, then copy the built and static files into `dist/`.
-```
-make all
-```
+### Deploying to hardware
+Over Wi-Fi: `scripts/push-update.sh <ip>`, or `make push DEVICE=<ip>` — see
+[UPDATING.md](UPDATING.md). By card: `make deploy SDCARD_PATH=/path/to/card`, or put `SDCARD_PATH`
+in a git-ignored `local.mk`.
 
-### Deploying to Hardware
-
-For quick testing on real hardware, you can use the deployment targets:
-
-1. Create a `local.mk` file (git-ignored) in the project root:
-```bash
-cp local.mk.example local.mk
-```
-
-2. Edit `local.mk` and set your SD card path:
-```makefile
-SDCARD_PATH=/path/to/sdcard  # Adjust for your mount point
-```
-
-3. Deploy just update files to existing Allium SD Card:
-```bash
-make deploy
-```
-
-Or deploy everything to a fresh SD Card:
-```bash
-make deploy-all
-```
-
-Alternatively, set `SDCARD_PATH` as an environment variable:
-```bash
-SDCARD_PATH=/path/to/sdcard make deploy
-```
-
+### Debugging on the device
+- `allium.log` at the card root is `alliumd`'s log at `RUST_LOG=info`, readable over the file server
+  at `http://<ip>/allium.log`.
+- A file called `.debug` at the card root makes the boot script bring up Wi-Fi and telnet and **not**
+  reboot when `alliumd` exits — the way out of a reboot loop.
+- Apps → Terminal is a shell on the device.
 
 ## Acknowledgements
 
 Allium is only possible thanks to the Miyoo Mini community, including but not limited to:
 - eggs: RetroArch port, [many code samples](https://www.dropbox.com/sh/hqcsr1h1d7f8nr3/AABtSOygIX_e4mio3rkLetWTa), answering questions on Discord
-- [Onion team](https://github.com/OnionUI/Onion) (Aemiii91, Schmurtz, Totofaki, and more): Maintaining a sane-defaults RetroArch configuration, and the huge village
+- [Onion team](https://github.com/OnionUI/Onion) (Aemiii91, Schmurtz, Totofaki, and more): maintaining a sane-defaults RetroArch configuration, and the huge village
 - kebabstorm: [Miyoo Mini resources](https://github.com/anzz1/miyoomini-resources)
 - shauninman: Allium is heavily inspired by [MiniUI](https://github.com/shauninman/MiniUI)'s simplicity and clean design
 - [steward-fu](https://github.com/steward-fu): miraculous DraStic port
 - Early adopters and testers of Allium
-- [Icons8.com](icons8.com) for the icons used in the wiki.
+- [Icons8.com](https://icons8.com) for the icons used in the upstream wiki
 
 ## Community
 
-Need help? Want to contribute? Join the Allium community on Discord:
-
-👉 https://discord.gg/eSvVqe6c8n
+Upstream Allium has a Discord at https://discord.gg/eSvVqe6c8n. This fork is a personal one and is
+not supported there.

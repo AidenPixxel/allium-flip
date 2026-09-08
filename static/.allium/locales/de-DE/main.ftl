@@ -134,18 +134,6 @@ guide-button-search = Suchen
 guide-button-next = Weiter
 guide-button-prev = Zurück
 
-# Hotkeys
-hotkeys-global = Globale Tastenkürzel:
-hotkeys-screenshot = Bildschirmfoto
-hotkeys-volume-down = Lautstärke -
-hotkeys-volume-up = Lautstärke +
-hotkeys-brightness-down = Helligkeit -
-hotkeys-brightness-up = Helligkeit +
-
-hotkeys-ingame = Tastenkürzel im Spiel:
-hotkeys-toggle-aspect-ratio = Seitenverhältnis umschalten
-hotkeys-toggle-fps = FPS umschalten
-
 # Common
 button-back = Zurück
 button-confirm = OK

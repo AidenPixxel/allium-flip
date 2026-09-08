@@ -133,18 +133,6 @@ guide-button-search = 搜索
 guide-button-next = 下一項
 guide-button-prev = 上一項
 
-# Hotkeys
-hotkeys-global = 全局熱鍵：
-hotkeys-screenshot = 屏幕截圖
-hotkeys-volume-down = 減小音量
-hotkeys-volume-up = 增大音量
-hotkeys-brightness-down = 降低亮度
-hotkeys-brightness-up = 增加亮度
-
-hotkeys-ingame = 遊戲內熱鍵：
-hotkeys-toggle-aspect-ratio = 更改縱橫比
-hotkeys-toggle-fps = 切換FPS顯示
-
 # Common
 button-back = 返回
 button-confirm = 確認
