@@ -129,6 +129,23 @@ Then eject the card properly — **this matters**, or you can be left with a hal
 
 | Kept | Replaced |
 | --- | --- |
+| `Roms/`, `BIOS/`, `Screenshots/` | `.allium/bin/`, `scripts/`, `locales/`, `cores/`, `fonts/` |
+| `Saves/` — save states, `allium.db`, RetroArch's own per-game config | `.tmp_update/` |
+| `.allium/state/` — Wi-Fi, display, power, theme and language settings | `RetroArch/` and its core set |
+| `.allium/config/consoles.toml` and `cores.toml`, **if you have edited them** | `Apps/`, `Themes/` (your additions stay; shipped files are refreshed) |
+
+**Hand-edited `consoles.toml` and `cores.toml` survive.** The installer keeps what each release
+shipped as `consoles.toml.dist` beside the file. If yours still matches it, you get the new one; if
+it does not, yours stays and the new one lands as `.dist` for you to merge by hand. The first update
+that carries this logic has no `.dist` to compare against and installs the shipped file — so an edit
+made before it is overwritten once.
+
+**The install is staged.** The archive is unpacked beside the installation and each file is then
+moved into place, so a power cut part-way leaves whole files rather than half-written ones — and the
+archive stays put to finish the job on the next boot. It needs free space for the unpacked archive;
+the screen says how much if there is not enough.
+
+--- | --- |
 | `Roms/` | `.allium/bin/`, `scripts/`, `locales/`, `cores/` |
 | `Saves/` — including save states, `allium.db`, and RetroArch's own per-game config | `.allium/config/consoles.toml` and `cores.toml` |
 | `BIOS/` | `.tmp_update/` |
@@ -182,8 +199,8 @@ a LAN with no route to the internet it never comes up.
 uploaded, and nothing on the handheld was touched.
 
 **Nothing happens after restarting.** Confirm the file landed as `allium-ota.zip` at the card root
-and not under a subfolder. The installer also needs 300 MB free, and gives up with a message on
-screen if there is less.
+and not under a subfolder. The installer also needs room to unpack the archive beside the
+installation, and says how much on screen if there is not enough.
 
 **A file called `allium-ota.zip.bad` has appeared.** The installer found the archive incomplete and
 refused it, deliberately moving it aside so it does not retry on every boot. Delete it and push
