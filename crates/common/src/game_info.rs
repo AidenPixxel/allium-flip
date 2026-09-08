@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::{ALLIUM_GAME_INFO, ALLIUM_GAMES_DIR, ALLIUM_SCRIPTS_DIR};
 use crate::performance::PerformanceMode;
+use crate::state_file;
 
 #[derive(Debug, Serialize, Deserialize)]
 /// Information about a game. Used to restore a game after a restart, and to calculate playtime.
@@ -34,7 +35,7 @@ pub struct GameInfo {
     /// Carried here rather than re-read from the database because alliumd rebuilds the child from
     /// this file alone when resuming, and opening SQLite on that path would cost time on a launch
     /// that is already the slow part. `serde(default)` is load-bearing: without it, a state file
-    /// written by an older build fails to parse and `load` deletes it, dropping the game in
+    /// written by an older build fails to parse and `load` sets it aside, dropping the game in
     /// progress on the first boot after an update.
     #[serde(default)]
     pub performance_mode: PerformanceMode,
@@ -98,29 +99,28 @@ impl GameInfo {
 
     /// Loads the current game info from file, if exists.
     pub fn load() -> Result<Option<Self>> {
-        Ok(if ALLIUM_GAME_INFO.exists() {
-            let file = File::open(ALLIUM_GAME_INFO.as_path())?;
-            let Ok(game_info) = serde_json::from_reader::<_, Self>(file) else {
-                fs::remove_file(ALLIUM_GAME_INFO.as_path())?;
-                return Ok(None);
-            };
-            if game_info.needs_swap() {
-                debug!("enabling swap");
-                Command::new(ALLIUM_SCRIPTS_DIR.join("swap-on.sh"))
-                    .spawn()?
-                    .wait()?;
-            }
-            Some(game_info)
-        } else {
-            None
-        })
+        // A file that does not parse is kept as current_game.bak rather than deleted: it used to
+        // be, and that silently dropped the game in progress on the first boot after an update.
+        Ok(
+            if let Some(game_info) =
+                state_file::load::<Self>(ALLIUM_GAME_INFO.as_path(), "game info")
+            {
+                if game_info.needs_swap() {
+                    debug!("enabling swap");
+                    Command::new(ALLIUM_SCRIPTS_DIR.join("swap-on.sh"))
+                        .spawn()?
+                        .wait()?;
+                }
+                Some(game_info)
+            } else {
+                None
+            },
+        )
     }
 
     /// Saves the current game info to file.
     pub fn save(&self) -> Result<()> {
-        let file = File::create(ALLIUM_GAME_INFO.as_path())?;
-        serde_json::to_writer(file, self)?;
-        Ok(())
+        state_file::save(ALLIUM_GAME_INFO.as_path(), self)
     }
 
     /// Deletes the current game info file.
@@ -151,7 +151,7 @@ impl GameInfo {
     /// Records a new performance mode for the game currently running.
     ///
     /// Deliberately does not round-trip through [`GameInfo::load`], which spawns `swap-on.sh` and
-    /// deletes the state file on a parse failure -- neither is wanted from the in-game menu with
+    /// sets the state file aside on a parse failure -- neither is wanted from the in-game menu with
     /// a game running. Without this, changing the mode mid-game would be undone by the next
     /// resume, which re-applies whatever was resolved at launch.
     pub fn store_performance_mode(mode: PerformanceMode) -> Result<()> {
@@ -175,9 +175,9 @@ mod tests {
 
     #[test]
     fn older_state_files_still_parse() {
-        // `load` deletes the state file on a parse failure, which would drop the game in progress
-        // on the first boot after an update. A file written before `performance_mode` existed has
-        // to keep deserializing.
+        // A parse failure loses the game in progress on the first boot after an update (and used
+        // to delete the state file too). A file written before `performance_mode` existed has to
+        // keep deserializing.
         let legacy = r#"{
             "name": "Game One",
             "path": "Roms/GBA/Game One.gba",

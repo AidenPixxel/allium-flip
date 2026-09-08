@@ -1,18 +1,14 @@
-use std::{
-    borrow::Cow,
-    collections::HashMap,
-    fmt,
-    fs::{self, File},
-};
+use std::{borrow::Cow, collections::HashMap, fmt};
 
 use anyhow::Result;
 use fluent_templates::{
     ArcLoader, LanguageIdentifier, Loader, fluent_bundle::FluentValue, loader::langid,
 };
-use log::{debug, warn};
+use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{ALLIUM_LOCALE_SETTINGS, ALLIUM_LOCALES_DIR, ALLIUM_THEMES_DIR};
+use crate::state_file;
 use crate::stylesheet::Theme;
 
 pub use fluent_templates::fluent_bundle::FluentValue as LocaleFluentValue;
@@ -36,22 +32,14 @@ impl LocaleSettings {
     }
 
     pub fn load() -> Result<Self> {
-        if ALLIUM_LOCALE_SETTINGS.exists() {
-            debug!("found state, loading from file");
-            let file = File::open(ALLIUM_LOCALE_SETTINGS.as_path())?;
-            if let Ok(json) = serde_json::from_reader(file) {
-                return Ok(json);
-            }
-            warn!("failed to read locale file, removing");
-            fs::remove_file(ALLIUM_LOCALE_SETTINGS.as_path())?;
-        }
-        Ok(Self::new())
+        Ok(state_file::load_or_default(
+            ALLIUM_LOCALE_SETTINGS.as_path(),
+            "locale",
+        ))
     }
 
     pub fn save(&self) -> Result<()> {
-        let file = File::create(ALLIUM_LOCALE_SETTINGS.as_path())?;
-        serde_json::to_writer(file, &self)?;
-        Ok(())
+        state_file::save(ALLIUM_LOCALE_SETTINGS.as_path(), self)
     }
 }
 

@@ -1,12 +1,10 @@
-use std::fs::{self, File};
-
 use anyhow::Result;
-use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use strum::FromRepr;
 
 use crate::constants::ALLIUM_POWER_SETTINGS;
 use crate::performance::PerformanceMode;
+use crate::state_file;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PowerSettings {
@@ -99,22 +97,11 @@ impl PowerSettings {
     }
 
     pub fn load() -> Result<Self> {
-        if ALLIUM_POWER_SETTINGS.exists() {
-            debug!("found state, loading from file");
-            let file = File::open(ALLIUM_POWER_SETTINGS.as_path())?;
-            if let Ok(json) = serde_json::from_reader(file) {
-                return Ok(json);
-            }
-            warn!("failed to read power file, removing");
-            fs::remove_file(ALLIUM_POWER_SETTINGS.as_path())?;
-        }
-        Ok(Self::new())
+        Ok(state_file::load(ALLIUM_POWER_SETTINGS.as_path(), "power").unwrap_or_else(Self::new))
     }
 
     pub fn save(&self) -> Result<()> {
-        let file = File::create(ALLIUM_POWER_SETTINGS.as_path())?;
-        serde_json::to_writer(file, &self)?;
-        Ok(())
+        state_file::save(ALLIUM_POWER_SETTINGS.as_path(), self)
     }
 }
 
@@ -124,8 +111,8 @@ mod tests {
 
     #[test]
     fn older_power_files_still_parse() {
-        // `load` deletes power.json and resets every power setting on a parse failure, so a file
-        // written before `charging_boot_action` existed must still deserialize.
+        // A parse failure resets every power setting to its default (and used to delete the file
+        // outright), so a file written before `charging_boot_action` existed must still deserialize.
         let legacy = r#"{
             "power_button_action": "Suspend",
             "lid_close_action": "Shutdown",

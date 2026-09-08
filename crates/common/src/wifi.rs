@@ -1,13 +1,16 @@
+#[cfg(feature = "miyoo")]
 use std::fs::{self, File};
+#[cfg(feature = "miyoo")]
 use std::io::Write;
 #[cfg(feature = "miyoo")]
 use tokio::process::Command;
 
 use anyhow::Result;
-use log::{debug, info, warn};
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 
 use crate::constants::ALLIUM_WIFI_SETTINGS;
+use crate::state_file;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -42,17 +45,9 @@ impl WiFiSettings {
     }
 
     pub fn load() -> Result<Self> {
-        if ALLIUM_WIFI_SETTINGS.exists() {
-            debug!("found state, loading from file");
-            if let Ok(json) = fs::read_to_string(ALLIUM_WIFI_SETTINGS.as_path())
-                && let Ok(json) = serde_json::from_str(&json)
-            {
-                return Ok(json);
-            }
-            warn!("failed to read state file, removing");
-            fs::remove_file(ALLIUM_WIFI_SETTINGS.as_path())?;
-        }
-        Ok(Self::load_wpa_supplicant_conf().unwrap_or_default())
+        Ok(state_file::load(ALLIUM_WIFI_SETTINGS.as_path(), "wifi")
+            .or_else(Self::load_wpa_supplicant_conf)
+            .unwrap_or_default())
     }
 
     pub fn init(&self) -> Result<()> {
