@@ -1,15 +1,19 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use common::command::{Command, Value};
+use common::database::Database;
 use common::display::Display;
+use common::game_info::GameInfo;
 use common::geom::{Alignment, Point, Rect};
 use common::locale::Locale;
+use common::performance::{self, PerformanceMode};
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
+use common::power::PowerSettings;
 use common::resources::Resources;
 use common::retroarch_config::OverrideScope;
-use common::retroarch_options::{Overrides, Setting};
+use common::retroarch_options::{Overrides, PERFORMANCE_KEY, Setting, Target};
 use common::stylesheet::Stylesheet;
 use common::view::{ButtonHint, ButtonHints, Label, Select, SettingsList, View};
 use log::warn;
@@ -109,10 +113,9 @@ impl OverrideSettings {
 
         for setting in settings {
             labels.push(locale.t(setting.label));
-            let map = overrides.read(scope, setting.target);
             rights.push(Box::new(Select::new(
                 Point::zero(),
-                setting.current(&map),
+                0,
                 setting
                     .choices
                     .iter()
@@ -160,6 +163,8 @@ impl OverrideSettings {
             description_rect,
             button_hints,
         };
+        // One code path for the initial values and for a scope change
+        this.reload_rows();
         this.refresh_description();
         this
     }
@@ -167,6 +172,58 @@ impl OverrideSettings {
     /// The setting a row edits, or `None` for the scope row.
     fn setting(&self, row: usize) -> Option<&'static Setting> {
         row.checked_sub(1).and_then(|i| self.settings.get(i))
+    }
+
+    /// What a setting currently reads as, from whichever store backs it.
+    fn state_of(&self, setting: &Setting) -> BTreeMap<String, String> {
+        match setting.target {
+            Target::Allium => {
+                // Synthesised into the same shape a config file would give, so `current` needs no
+                // special case for a setting Allium stores itself.
+                let mut map = BTreeMap::new();
+                let mode = self
+                    .res
+                    .get::<Database>()
+                    .get_performance_mode(self.overrides.rom())
+                    .unwrap_or_default()
+                    .filter(|mode| *mode != PerformanceMode::System);
+                if let Some(mode) = mode {
+                    map.insert(PERFORMANCE_KEY.to_owned(), mode.name().to_owned());
+                }
+                map
+            }
+            target => self.overrides.read(self.scope, target),
+        }
+    }
+
+    /// Persists a performance mode the way the in-game row used to.
+    ///
+    /// Three writes, because three things need it: the database remembers it for next launch, the
+    /// governor takes it now, and the state file carries it so a resume does not re-apply whatever
+    /// was resolved when the game started.
+    fn write_performance(&self, choice: usize, setting: &Setting) {
+        let mode = setting
+            .changes(choice)
+            .into_iter()
+            .find(|(key, _)| *key == PERFORMANCE_KEY)
+            .and_then(|(_, value)| value)
+            .and_then(|value| PerformanceMode::from_name(&value));
+
+        if let Err(err) = self
+            .res
+            .get::<Database>()
+            .set_performance_mode(self.overrides.rom(), mode)
+        {
+            warn!("could not save the performance mode: {err}");
+        }
+
+        let effective =
+            mode.unwrap_or_else(|| PowerSettings::load().unwrap_or_default().performance_mode);
+        performance::apply(effective);
+
+        if let Err(err) = GameInfo::store_performance_mode(effective) {
+            warn!("could not record the performance mode for resume: {err}");
+        }
     }
 
     fn refresh_description(&mut self) {
@@ -190,7 +247,7 @@ impl OverrideSettings {
             .iter()
             .enumerate()
             .map(|(i, setting)| {
-                let map = self.overrides.read(self.scope, setting.target);
+                let map = self.state_of(setting);
                 (
                     i + 1,
                     setting.current(&map),
@@ -225,6 +282,11 @@ impl OverrideSettings {
         let Some(setting) = self.setting(row) else {
             return;
         };
+
+        if setting.target == Target::Allium {
+            self.write_performance(choice, setting);
+            return;
+        }
 
         if let Err(err) = self.overrides.apply(self.scope, setting, choice) {
             warn!("could not write {}: {err}", setting.label);

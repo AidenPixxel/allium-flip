@@ -37,10 +37,16 @@ impl Overrides {
         &self.core_name
     }
 
+    /// The ROM this screen is editing, for the settings Allium stores itself.
+    pub fn rom(&self) -> &std::path::Path {
+        &self.rom
+    }
+
     fn path(&self, scope: OverrideScope, target: Target) -> Option<PathBuf> {
         match target {
             Target::Cfg => retroarch_config::override_path(scope, &self.core_name, &self.rom),
             Target::Remap => retroarch_config::remap_path(scope, &self.core_name, &self.rom),
+            Target::Allium => None,
         }
     }
 
@@ -61,6 +67,10 @@ impl Overrides {
             .unwrap_or_default()
     }
 
+    /// Writes a choice to the file its setting targets.
+    ///
+    /// [`Target::Allium`] rows have no file, so this leaves them alone -- the screen persists
+    /// those itself, because they land in Allium's database rather than RetroArch's config.
     pub fn apply(&self, scope: OverrideScope, setting: &Setting, choice: usize) -> Result<()> {
         let Some(path) = self.path(scope, setting.target) else {
             return Ok(());
@@ -75,7 +85,16 @@ impl Overrides {
 pub enum Target {
     Cfg,
     Remap,
+    /// Allium's own per-game store, not a RetroArch file at all.
+    ///
+    /// Always this game, whatever scope the screen is set to: RetroArch never reads it, so its
+    /// tiers do not apply. The row's description says so.
+    Allium,
 }
+
+/// The pseudo-key a [`Target::Allium`] row carries its value under. Not written to any file -- the
+/// screen translates it into a database write.
+pub const PERFORMANCE_KEY: &str = "performance_mode";
 
 /// One option offered for a setting.
 pub struct Choice {
@@ -168,6 +187,37 @@ macro_rules! on_off {
 /// The Options screen.
 pub const OPTIONS: &[Setting] = &[
     Setting {
+        // Allium's own setting, not RetroArch's, and the one row on this screen the scope picker
+        // above it does not govern.
+        label: "override-performance",
+        description: "override-desc-performance",
+        keys: &[PERFORMANCE_KEY],
+        target: Target::Allium,
+        choices: &[
+            DEFAULT,
+            Choice {
+                label: "settings-power-performance-mode-powersave",
+                sets: &[(PERFORMANCE_KEY, "Powersave")],
+            },
+            Choice {
+                label: "settings-power-performance-mode-low",
+                sets: &[(PERFORMANCE_KEY, "Low")],
+            },
+            Choice {
+                label: "settings-power-performance-mode-medium",
+                sets: &[(PERFORMANCE_KEY, "Medium")],
+            },
+            Choice {
+                label: "settings-power-performance-mode-high",
+                sets: &[(PERFORMANCE_KEY, "High")],
+            },
+            Choice {
+                label: "settings-power-performance-mode-max",
+                sets: &[(PERFORMANCE_KEY, "Max")],
+            },
+        ],
+    },
+    Setting {
         label: "override-aspect-ratio",
         description: "override-desc-aspect-ratio",
         // Only the dingux IPU key. The generic `aspect_ratio_index` is what the shipped per-core
@@ -184,6 +234,78 @@ pub const OPTIONS: &[Setting] = &[
             Choice {
                 label: "override-aspect-ratio-full",
                 sets: &[("video_dingux_ipu_keep_aspect", "false")],
+            },
+        ],
+    },
+    Setting {
+        // The shipped RetroArch notes describe exactly these three, in this order, which is also
+        // the order of the driver's own enum: bicubic 0, bilinear 1, nearest 2.
+        label: "override-scaling",
+        description: "override-desc-scaling",
+        keys: &["video_dingux_ipu_filter_type"],
+        target: Target::Cfg,
+        choices: &[
+            DEFAULT,
+            Choice {
+                label: "override-scaling-bicubic",
+                sets: &[("video_dingux_ipu_filter_type", "0")],
+            },
+            Choice {
+                label: "override-scaling-bilinear",
+                sets: &[("video_dingux_ipu_filter_type", "1")],
+            },
+            Choice {
+                label: "override-scaling-nearest",
+                sets: &[("video_dingux_ipu_filter_type", "2")],
+            },
+        ],
+    },
+    Setting {
+        label: "override-integer-scale",
+        description: "override-desc-integer-scale",
+        keys: &["video_scale_integer"],
+        target: Target::Cfg,
+        choices: on_off!("video_scale_integer"),
+    },
+    Setting {
+        // Software scalers shipped under .retroarch/filters/video. The path form is the one the
+        // shipped mGBA/SGB.cfg already uses, and an empty string is how the stock config turns it
+        // off. The two Game Boy grids are 3x, which lands inside 640x480 for GB and GBC but
+        // overshoots for GBA -- another reason the scope picker matters.
+        label: "override-screen-filter",
+        description: "override-desc-screen-filter",
+        keys: &["video_filter"],
+        target: Target::Cfg,
+        choices: &[
+            DEFAULT,
+            Choice {
+                label: "override-off",
+                sets: &[("video_filter", "")],
+            },
+            Choice {
+                label: "override-filter-scanline",
+                sets: &[("video_filter", "./.retroarch/filters/video/Scanline2x.filt")],
+            },
+            Choice {
+                label: "override-filter-lcd",
+                sets: &[(
+                    "video_filter",
+                    "./.retroarch/filters/video/LCD2x/LCD2x.filt",
+                )],
+            },
+            Choice {
+                label: "override-filter-dot-matrix",
+                sets: &[(
+                    "video_filter",
+                    "./.retroarch/filters/video/GB-GBC/Dot Matrix 3x/Dot_Matrix_3x.filt",
+                )],
+            },
+            Choice {
+                label: "override-filter-dmg",
+                sets: &[(
+                    "video_filter",
+                    "./.retroarch/filters/video/GB-GBC/Dot Matrix 3x/Dot_Matrix_3x_GB_DMG_Grid.filt",
+                )],
             },
         ],
     },
@@ -235,6 +357,38 @@ pub const OPTIONS: &[Setting] = &[
         keys: &["rewind_enable"],
         target: Target::Cfg,
         choices: on_off!("rewind_enable"),
+    },
+    Setting {
+        // Dropping frames while fast-forwarding is what makes it actually fast on this SoC rather
+        // than merely busy. The shipped mGBA override already turns it on.
+        label: "override-ff-frameskip",
+        description: "override-desc-ff-frameskip",
+        keys: &["fastforward_frameskip"],
+        target: Target::Cfg,
+        choices: on_off!("fastforward_frameskip"),
+    },
+    Setting {
+        // Milliseconds. The shipped PCSX-ReARMed override sets 64, so that is the proven middle;
+        // lower is tighter but crackles on a busy core.
+        label: "override-audio-latency",
+        description: "override-desc-audio-latency",
+        keys: &["audio_latency"],
+        target: Target::Cfg,
+        choices: &[
+            DEFAULT,
+            Choice {
+                label: "override-latency-32",
+                sets: &[("audio_latency", "32")],
+            },
+            Choice {
+                label: "override-latency-64",
+                sets: &[("audio_latency", "64")],
+            },
+            Choice {
+                label: "override-latency-128",
+                sets: &[("audio_latency", "128")],
+            },
+        ],
     },
 ];
 
@@ -561,7 +715,38 @@ mod tests {
     fn hotkeys_and_remaps_go_to_different_files() {
         assert!(CONTROLS.iter().any(|s| s.target == Target::Cfg));
         assert!(CONTROLS.iter().any(|s| s.target == Target::Remap));
-        assert!(OPTIONS.iter().all(|s| s.target == Target::Cfg));
+        // Controls are all RetroArch's; nothing there is Allium's own
+        assert!(CONTROLS.iter().all(|s| s.target != Target::Allium));
+    }
+
+    #[test]
+    fn performance_is_the_only_setting_allium_stores_itself() {
+        let ours: Vec<_> = OPTIONS
+            .iter()
+            .chain(CONTROLS.iter())
+            .filter(|s| s.target == Target::Allium)
+            .collect();
+
+        assert_eq!(ours.len(), 1);
+        assert_eq!(ours[0].keys, &[PERFORMANCE_KEY]);
+        // The screen translates this key into a database write, so a stray second Allium-backed
+        // row would be silently ignored rather than saved
+        assert_eq!(ours[0].label, "override-performance");
+    }
+
+    #[test]
+    fn performance_choices_are_all_parseable_modes() {
+        use crate::performance::PerformanceMode;
+
+        let perf = OPTIONS.iter().find(|s| s.target == Target::Allium).unwrap();
+
+        for choice in perf.choices.iter().skip(1) {
+            let (_, value) = choice.sets[0];
+            assert!(
+                PerformanceMode::from_name(value).is_some(),
+                "{value} is not a performance mode, so the screen would drop it"
+            );
+        }
     }
 
     /// Checks that every row with the given target agrees on what number a button label means.

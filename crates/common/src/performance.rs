@@ -66,17 +66,7 @@ enum RawPerformanceMode {
 impl From<RawPerformanceMode> for PerformanceMode {
     fn from(raw: RawPerformanceMode) -> Self {
         match raw {
-            RawPerformanceMode::Name(name) => match name.as_str() {
-                "System" => Self::System,
-                // Battery was this governor under a name that oversold what it does
-                "Powersave" | "Battery" => Self::Powersave,
-                "Low" => Self::Low,
-                "Medium" => Self::Medium,
-                // The two presets that always worked, renamed but unchanged
-                "High" | "Balanced" => Self::High,
-                "Max" | "Performance" => Self::Max,
-                _ => Self::default(),
-            },
+            RawPerformanceMode::Name(name) => Self::from_name(&name).unwrap_or_default(),
             RawPerformanceMode::Repr(repr) => Self::from_repr(repr as usize).unwrap_or_default(),
             RawPerformanceMode::Unknown(_) => Self::default(),
         }
@@ -84,6 +74,34 @@ impl From<RawPerformanceMode> for PerformanceMode {
 }
 
 impl PerformanceMode {
+    /// The variant's name, as written to `power.json` and as the override screens carry it.
+    pub fn name(self) -> &'static str {
+        match self {
+            PerformanceMode::System => "System",
+            PerformanceMode::Powersave => "Powersave",
+            PerformanceMode::Low => "Low",
+            PerformanceMode::Medium => "Medium",
+            PerformanceMode::High => "High",
+            PerformanceMode::Max => "Max",
+        }
+    }
+
+    /// Parses a name, accepting the ones earlier builds wrote.
+    ///
+    /// `Battery`, `Balanced` and `Performance` were this list before the presets started capping
+    /// the clock rather than pinning it; each maps to the preset that reproduces what it did.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "System" => Self::System,
+            "Powersave" | "Battery" => Self::Powersave,
+            "Low" => Self::Low,
+            "Medium" => Self::Medium,
+            "High" | "Balanced" => Self::High,
+            "Max" | "Performance" => Self::Max,
+            _ => return None,
+        })
+    }
+
     /// Governor names to try, best first.
     ///
     /// Nothing guarantees a given kernel was built with any particular governor -- the vendor SDK
