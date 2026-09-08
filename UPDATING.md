@@ -22,36 +22,75 @@ handful of folders and leaves your games and saves alone.
 Note the **IP Address** shown on the same screen — for example `192.168.1.42`. It is worth giving
 the handheld a static lease on your router so this does not change.
 
-### Every update
+### Every update — Linux and macOS
 
-On Linux or macOS:
+You need `curl` and `unzip`:
 
 ```bash
-make push DEVICE=192.168.1.42
+sudo apt install curl unzip      # Debian, Ubuntu
+sudo dnf install curl unzip      # Fedora
+sudo pacman -S curl unzip        # Arch
 ```
 
-Put `DEVICE=192.168.1.42` in a `local.mk` at the repo root and it becomes just `make push` — the
-Makefile already includes that file, the same way it picks up `SDCARD_PATH`.
-
-Without `make`, the script does the same thing:
+**If you have the repo cloned**, run this from its root:
 
 ```bash
 ./scripts/push-update.sh 192.168.1.42
 ```
 
-On Windows:
+`make push DEVICE=192.168.1.42` does the same thing. Once it works, put `DEVICE=192.168.1.42` in a
+`local.mk` at the repo root and it shortens to just `make push` — the Makefile already includes
+that file, the same way it picks up `SDCARD_PATH`.
+
+**If you do not have the repo**, the script stands alone. Fetch just it:
+
+```bash
+curl -fLO https://raw.githubusercontent.com/AidenPixxel/allium-flip/main/scripts/push-update.sh
+chmod +x push-update.sh
+./push-update.sh 192.168.1.42
+```
+
+Either way you should see:
+
+```
+Fetching the latest release from AidenPixxel/allium-flip ...
+######################################################## 100.0%
+Checking the archive ...
+Uploading to http://192.168.1.42/allium-ota.zip ...
+######################################################## 100.0%
+
+Uploaded. Restart the handheld to install it.
+```
+
+**Or with no script at all** — this is the whole mechanism, and it needs nothing but `curl`:
+
+```bash
+curl -fLO https://github.com/AidenPixxel/allium-flip/releases/latest/download/allium-armv7-unknown-linux-gnueabihf.zip
+curl -f -T allium-armv7-unknown-linux-gnueabihf.zip http://192.168.1.42/allium-ota.zip
+```
+
+The only thing that matters is the destination name. The boot script looks for exactly
+`/mnt/SDCARD/allium-ota.zip`, and the Web File Explorer's root is the card root — so
+`http://<ip>/allium-ota.zip` is that file. What you skip by doing it this way is the check that the
+download completed, which is what the script adds.
+
+### Every update — Windows
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\push-update.ps1 -Device 192.168.1.42
 ```
 
-Then **restart the handheld.** It shows "Updating Allium. Please wait...", installs, and reboots
-itself. Check **Settings → System Update → Allium Version** afterwards to confirm the new version
-took.
+Use `curl.exe` rather than `curl` in any manual command — `curl` in PowerShell is an alias for
+`Invoke-WebRequest`, which does not accept `-T`.
+
+### Then restart the handheld
+
+It shows "Updating Allium. Please wait...", installs, and reboots itself. Check
+**Settings → System Update → Allium Version** afterwards to confirm the new version took.
 
 ### Pushing a build that was never released
 
-Any zip works — a CI artifact from a side branch, say. Pass it as the second argument:
+Any zip works — a CI artifact from a side branch, say. Pass it as a second argument:
 
 ```bash
 ./scripts/push-update.sh 192.168.1.42 ~/Downloads/allium-armv7-unknown-linux-gnueabihf.zip
@@ -60,20 +99,6 @@ Any zip works — a CI artifact from a side branch, say. Pass it as the second a
 ```powershell
 .\scripts\push-update.ps1 -Device 192.168.1.42 -Zip $HOME\Downloads\allium-armv7-unknown-linux-gnueabihf.zip
 ```
-
-### Doing it by hand
-
-The scripts only add fetching and checking around a single upload. If you already have the zip:
-
-```bash
-curl -f -T allium-armv7-unknown-linux-gnueabihf.zip http://192.168.1.42/allium-ota.zip
-```
-
-On Windows use `curl.exe`, not `curl` — the latter is a PowerShell alias for `Invoke-WebRequest`
-and does not accept `-T`.
-
-The filename matters. The boot script looks for exactly `/mnt/SDCARD/allium-ota.zip`, which is
-what the Web File Explorer's root maps to.
 
 ---
 
@@ -117,16 +142,41 @@ lost on every update. Keep a copy if you have customised them.
 
 ## Troubleshooting
 
-**The script will not run on Windows.** Script execution is off by default. Either use the
+### Linux and macOS
+
+**`bash: ./push-update.sh: Permission denied`** — the file is not executable:
+
+```bash
+chmod +x push-update.sh
+```
+
+**`./scripts/push-update.sh: No such file or directory`** — you are not in the repo root. Either
+`cd` there, or use the standalone download above, which puts the script in the current directory.
+
+**`make: *** No rule to make target 'push'`** — same cause: `make` must be run from the repo root.
+
+**`unzip is required but not installed`** — install it; the script uses it to check the archive
+before uploading. See the install lines at the top of this page.
+
+**`curl: (7) Failed to connect to 192.168.1.42 port 80`** — nothing is listening. Check the IP on
+the handheld has not changed, and that **Web File Explorer** is still On.
+
+### Windows
+
+**The script will not run.** Script execution is off by default. Either use the
 `-ExecutionPolicy Bypass` form above, or allow local scripts once:
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-**Upload fails, or the browser cannot reach the handheld.** Check the IP has not changed, and that
-**Web File Explorer** is still On. Also note the handheld pings `1.1.1.1` before starting that
-server — on a LAN with no route to the internet it never comes up.
+**`curl : The term '-T' is not recognized`** — you used `curl`, which PowerShell aliases to
+`Invoke-WebRequest`. Use `curl.exe`.
+
+### Either platform
+
+**The file server is not reachable at all.** The handheld pings `1.1.1.1` before starting it, so on
+a LAN with no route to the internet it never comes up.
 
 **"The archive is incomplete or corrupt."** The download was cut short. Run it again; nothing was
 uploaded, and nothing on the handheld was touched.
