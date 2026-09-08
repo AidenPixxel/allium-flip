@@ -400,12 +400,16 @@ impl Power {
             list.select(state.selected);
         }
 
-        let description = Label::new(
+        // Bounded to the strip, which is what lets it scroll: `Label::scroll` is a silent no-op
+        // without a width, and an unbounded label draws straight off the edge of the screen
+        // instead of being cut at the rect the parent restores.
+        let mut description = Label::new(
             Point::new(description_rect.x, description_rect.y),
             description_text(list.selected(), &power_settings, &locale),
             Alignment::Left,
-            None,
+            Some(description_rect.w),
         );
+        description.scroll(true);
 
         drop(locale);
         drop(styles);
@@ -476,7 +480,15 @@ impl Power {
             &self.power_settings,
             &self.res.get::<Locale>(),
         );
-        self.description.set_text(text);
+
+        // Only on a real change. `Label::update` switches scrolling off as soon as a description
+        // is short enough to fit, so it has to be re-armed for the next long one -- but arming
+        // resets the offset, and doing that on every keypress would snap a description the user is
+        // halfway through reading back to its start.
+        if self.description.text() != text.as_str() {
+            self.description.set_text(text);
+            self.description.scroll(true);
+        }
     }
 }
 
