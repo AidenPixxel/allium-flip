@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 use std::fs::{self, File};
-use std::io::Write;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread::JoinHandle;
@@ -20,6 +19,7 @@ use common::locale::{Locale, LocaleSettings};
 use common::performance;
 use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
 use common::retroarch::RetroArchCommand;
+use common::state_file;
 use common::stylesheet::Stylesheet;
 use common::wifi::WiFiSettings;
 use enum_map::EnumMap;
@@ -114,41 +114,34 @@ impl AlliumDState {
     }
 
     pub fn load() -> Result<AlliumDState> {
-        if ALLIUMD_STATE.exists() {
-            debug!("found state, loading from file");
-            if let Ok(json) = fs::read_to_string(ALLIUMD_STATE.as_path())
-                && let Ok(this) = serde_json::from_str::<AlliumDState>(&json)
-            {
-                if Utc::now() < this.time {
-                    info!(
-                        "RTC is not working, advancing time to {}",
-                        this.time.format("%F %T")
-                    );
-                    let mut date = std::process::Command::new("date")
-                        .arg("--utc")
-                        .arg("--set")
-                        .arg(this.time.format("%F %T").to_string())
-                        .spawn()?;
-                    date.wait()?;
-                    let mut hwclock = std::process::Command::new("/sbin/hwclock")
-                        .arg("--systohc")
-                        .arg("--utc")
-                        .arg(this.time.format("%F %T").to_string())
-                        .spawn()?;
-                    hwclock.wait()?;
-                }
-                return Ok(this);
-            }
-            warn!("failed to read state file, removing");
-            fs::remove_file(ALLIUMD_STATE.as_path())?;
+        // An unreadable file is set aside as .bak, not deleted: besides the volume and brightness
+        // it holds the last known time, which is what advances a dead RTC below.
+        let Some(this) = state_file::load::<AlliumDState>(ALLIUMD_STATE.as_path(), "daemon") else {
+            return Ok(Self::new());
+        };
+        if Utc::now() < this.time {
+            info!(
+                "RTC is not working, advancing time to {}",
+                this.time.format("%F %T")
+            );
+            let mut date = std::process::Command::new("date")
+                .arg("--utc")
+                .arg("--set")
+                .arg(this.time.format("%F %T").to_string())
+                .spawn()?;
+            date.wait()?;
+            let mut hwclock = std::process::Command::new("/sbin/hwclock")
+                .arg("--systohc")
+                .arg("--utc")
+                .arg(this.time.format("%F %T").to_string())
+                .spawn()?;
+            hwclock.wait()?;
         }
-        Ok(Self::new())
+        Ok(this)
     }
 
     fn save(&self) -> Result<()> {
-        let json = serde_json::to_string(self).unwrap();
-        File::create(ALLIUMD_STATE.as_path())?.write_all(json.as_bytes())?;
-        Ok(())
+        state_file::save(ALLIUMD_STATE.as_path(), self)
     }
 }
 
@@ -197,8 +190,8 @@ async fn spawn_main() -> Result<Child> {
             game_info.start_time = Utc::now();
             game_info.save()?;
             // The launcher does not run on this path, so nothing else would re-apply the
-            // governor after a reboot. Infallible by design: this function's failures leave the
-            // device in a reboot loop.
+            // governor after a reboot. Infallible by design: a failure here would be retried by
+            // respawn_main every five seconds, never resuming the game.
             performance::apply(game_info.performance_mode);
             game_info.command().into()
         }
