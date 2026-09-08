@@ -66,6 +66,61 @@ jobs:
           command: test
           args: --package common --package alliumd --package allium-launcher --package allium-menu --package myctl
 
+  lint:
+    name: Clippy
+    runs-on: ubuntu-latest
+    # Advisory until the first run is clean. Five crates deny clippy::all, but nothing ever ran
+    # clippy before this job existed -- the dev machine cannot -- so the first pass will find
+    # things. Turn continue-on-error off once it is green.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          components: clippy
+          profile: minimal
+          override: true
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # The configuration the test job compiles
+      - name: cargo clippy
+        run: cargo clippy -p common -p alliumd -p allium-launcher -p allium-menu -p myctl --all-targets -- -D warnings
+
+      # The device configuration. Most of this fork's changes sit behind the miyoo feature, which
+      # the test job never compiles, so this is the only place they are type-checked before the
+      # armv7 build -- and the only linting they get at all.
+      - name: cargo clippy (miyoo)
+        run: cargo clippy -p common -p alliumd -p allium-launcher -p allium-menu --all-targets --features common/miyoo,alliumd/miyoo,allium-launcher/miyoo,allium-menu/miyoo -- -D warnings
+
+  simulator:
+    name: Build Simulator
+    runs-on: ubuntu-latest
+    # Advisory: nothing has built the simulator since the fork, so it may not compile at all. This
+    # job exists to find out, and to notice when a change breaks it.
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          profile: minimal
+          override: true
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo build --features simulator
+        run: cargo build -p allium-launcher -p allium-menu --features common/simulator,allium-launcher/simulator,allium-menu/simulator
+
   build:
     name: Build Artifact
     # Gates the release on fmt and tests: this job publishes, so it must not run for a tree
