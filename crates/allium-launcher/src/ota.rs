@@ -1,32 +1,67 @@
 use anyhow::{Context, Result};
 use common::constants::{ALLIUM_SD_ROOT, ALLIUM_UPDATE_SETTINGS};
+use common::state_file;
 use const_hex::ToHexExt;
-use log::{debug, info, warn};
+use log::info;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 use tokio::sync::mpsc;
 
-const GITHUB_REPOSITORY: &str = "goweiwen/Allium";
+/// This fork's own releases. Pointing at upstream offered an "update" that would restore every core
+/// trimmed from this build and replace alliumd and the launcher with stock binaries.
+const GITHUB_REPOSITORY: &str = "AidenPixxel/allium-flip";
 const RELEASE_FILE: &str = "allium-armv7-unknown-linux-gnueabihf.zip";
+const USER_AGENT: &str = "Allium-OTA-Updater";
 
 static UPDATE_FILE_PATH: LazyLock<PathBuf> =
     LazyLock::new(|| ALLIUM_SD_ROOT.join("allium-ota.zip"));
 
-/// Update channel selection
+/// The device has no system certificate store, so the Mozilla root set is compiled in instead of
+/// going through reqwest's platform verifier.
+static TLS_CONFIG: LazyLock<rustls::ClientConfig> = LazyLock::new(|| {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    let mut config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .expect("ring supports the default protocol versions")
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+
+    // A preconfigured config bypasses reqwest's own ALPN setup, and http2 is not compiled in.
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    config
+});
+
+fn client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .tls_backend_preconfigured(TLS_CONFIG.clone())
+        .build()
+        .context("Failed to build HTTP client")
+}
+
+/// Whether the System Update screen contacts GitHub at all.
+///
+/// Two states, not three: this fork's CI never marks a release as a prerelease, so a separate
+/// "nightly" channel could only ever fail its lookup. Discriminant order matters -- the settings
+/// screen indexes its Select by `channel as usize`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum UpdateChannel {
-    /// Never contact GitHub. The default for this fork: the OTA payload is upstream's, so an
-    /// update would restore every core trimmed from this build and overwrite the custom
-    /// alliumd/allium-launcher binaries with stock ones.
-    #[default]
+    /// Never contact GitHub
     Off,
-    Stable,
-    Nightly,
+    /// Offer the latest release. The old `Stable` and `Nightly` values read as this, so an
+    /// update.json written before the channels were collapsed keeps updates on.
+    #[default]
+    #[serde(alias = "Stable", alias = "Nightly")]
+    On,
 }
 
 /// Update settings that are persisted to disk
@@ -37,22 +72,14 @@ pub struct UpdateSettings {
 
 impl UpdateSettings {
     pub fn load() -> Result<Self> {
-        if ALLIUM_UPDATE_SETTINGS.exists() {
-            debug!("found update settings, loading from file");
-            let file = File::open(ALLIUM_UPDATE_SETTINGS.as_path())?;
-            if let Ok(json) = serde_json::from_reader(file) {
-                return Ok(json);
-            }
-            warn!("failed to read update settings file, removing");
-            fs::remove_file(ALLIUM_UPDATE_SETTINGS.as_path())?;
-        }
-        Ok(Self::default())
+        Ok(state_file::load_or_default(
+            ALLIUM_UPDATE_SETTINGS.as_path(),
+            "update",
+        ))
     }
 
     pub fn save(&self) -> Result<()> {
-        let file = File::create(ALLIUM_UPDATE_SETTINGS.as_path())?;
-        serde_json::to_writer(file, &self)?;
-        Ok(())
+        state_file::save(ALLIUM_UPDATE_SETTINGS.as_path(), self)
     }
 }
 
@@ -72,32 +99,7 @@ pub struct GitHubAsset {
     pub digest: Option<String>,
 }
 
-/// GitHub API response for git reference (tag)
-#[derive(Debug, Clone, Deserialize)]
-struct GitRef {
-    object: GitObject,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct GitObject {
-    sha: String,
-    #[serde(rename = "type")]
-    object_type: String,
-}
-
-/// GitHub API response for tag object (annotated tags)
-#[derive(Debug, Clone, Deserialize)]
-struct GitTag {
-    object: GitTagObject,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct GitTagObject {
-    sha: String,
-}
-
-/// Check if an update is available for the given channel
-/// Returns the GitHubRelease if an update is available
+/// The release to offer, or `None` when the device is up to date or the channel is off.
 pub async fn check_for_update(channel: UpdateChannel) -> Result<Option<GitHubRelease>> {
     let current_version = &*common::constants::ALLIUM_VERSION;
     info!("Current version: {}", current_version);
@@ -108,47 +110,59 @@ pub async fn check_for_update(channel: UpdateChannel) -> Result<Option<GitHubRel
             info!("Update channel is off, skipping update check");
             return Ok(None);
         }
-        UpdateChannel::Stable => get_latest_stable_release().await?,
-        UpdateChannel::Nightly => get_latest_nightly_release().await?,
+        UpdateChannel::On => get_latest_release().await?,
     };
-    let latest_version = get_release_version(&release).await;
+    let latest_version = get_release_version(&release);
     info!("Latest version: {}", latest_version);
 
-    if *current_version != latest_version {
-        Ok(Some(release))
-    } else {
-        Ok(None)
+    Ok(is_newer(&latest_version, current_version).then_some(release))
+}
+
+/// The version a release is known by: its tag, verbatim -- `v1.0.1-flip.14` on this fork.
+pub fn get_release_version(release: &GitHubRelease) -> String {
+    release.tag_name.clone()
+}
+
+/// Whether `latest` should be offered over `current`.
+///
+/// Comparing the tags for inequality, as this used to, offered a *downgrade* whenever the device
+/// ran anything but the newest build -- a side-branch artifact, say. Both are parsed and compared
+/// numerically. If either does not parse (a build with no version.txt reads `unknown`), inequality
+/// is the fallback: offering an update is the safe direction for a device whose version cannot be
+/// established.
+fn is_newer(latest: &str, current: &str) -> bool {
+    match (parse_version(latest), parse_version(current)) {
+        (Some(latest), Some(current)) => latest > current,
+        _ => latest != current,
     }
 }
 
-/// Get the version string for a release (fetches commit hash for nightly/prerelease)
-pub async fn get_release_version(release: &GitHubRelease) -> String {
-    if release.prerelease {
-        // For nightly, use "nightly-<commit-hash>"
-        if let Ok(commit_sha) = get_tag_commit_sha(&release.tag_name).await {
-            let short_hash = if commit_sha.len() >= 7 {
-                &commit_sha[..7]
-            } else {
-                &commit_sha
-            };
-            return format!("nightly-{}", short_hash);
-        }
-        "nightly".to_string()
-    } else {
-        release.tag_name.clone()
+/// `v1.0.1-flip.14` as `(1, 0, 1, 14)`. A plain `v1.0.1` gets a fourth part of 0, so it sorts
+/// before every `-flip.N` build of the same base version.
+fn parse_version(tag: &str) -> Option<(u32, u32, u32, u32)> {
+    let tag = tag.trim().trim_start_matches('v');
+    let (base, build) = match tag.split_once("-flip.") {
+        Some((base, build)) => (base, build.parse().ok()?),
+        None => (tag, 0),
+    };
+    let mut parts = base.split('.').map(|part| part.parse::<u32>().ok());
+    let major = parts.next()??;
+    let minor = parts.next()??;
+    let patch = parts.next()??;
+    if parts.next().is_some() {
+        return None;
     }
+    Some((major, minor, patch, build))
 }
 
-/// Get the latest stable release from GitHub
-async fn get_latest_stable_release() -> Result<GitHubRelease> {
+/// Get the latest release from GitHub
+async fn get_latest_release() -> Result<GitHubRelease> {
     let url = format!(
         "https://api.github.com/repos/{}/releases/latest",
         GITHUB_REPOSITORY
     );
 
-    let client = reqwest::Client::builder()
-        .user_agent("Allium-OTA-Updater")
-        .build()?;
+    let client = client()?;
 
     let release: GitHubRelease = client
         .get(&url)
@@ -160,77 +174,6 @@ async fn get_latest_stable_release() -> Result<GitHubRelease> {
         .context("Failed to parse release JSON")?;
 
     Ok(release)
-}
-
-/// Get the latest nightly (prerelease) from GitHub
-async fn get_latest_nightly_release() -> Result<GitHubRelease> {
-    let url = format!(
-        "https://api.github.com/repos/{}/releases",
-        GITHUB_REPOSITORY
-    );
-
-    let client = reqwest::Client::builder()
-        .user_agent("Allium-OTA-Updater")
-        .build()?;
-
-    let releases: Vec<GitHubRelease> = client
-        .get(&url)
-        .query(&[("per_page", "20")])
-        .send()
-        .await
-        .context("Failed to fetch releases")?
-        .json()
-        .await
-        .context("Failed to parse releases JSON")?;
-
-    // Find the first prerelease (they're returned in date order, newest first)
-    releases
-        .into_iter()
-        .find(|r| r.prerelease)
-        .context("No nightly release found")
-}
-
-/// Fetch the commit SHA for a given tag
-async fn get_tag_commit_sha(tag_name: &str) -> Result<String> {
-    let client = reqwest::Client::builder()
-        .user_agent("Allium-OTA-Updater")
-        .build()?;
-
-    let url = format!(
-        "https://api.github.com/repos/{}/git/ref/tags/{}",
-        GITHUB_REPOSITORY, tag_name
-    );
-
-    let git_ref: GitRef = client
-        .get(&url)
-        .send()
-        .await
-        .context("Failed to fetch tag reference")?
-        .json()
-        .await
-        .context("Failed to parse tag reference JSON")?;
-
-    if git_ref.object.object_type == "tag" {
-        // Annotated tag: we need to resolve to get the commit SHA
-        let tag_url = format!(
-            "https://api.github.com/repos/{}/git/tags/{}",
-            GITHUB_REPOSITORY, git_ref.object.sha
-        );
-
-        let git_tag: GitTag = client
-            .get(&tag_url)
-            .send()
-            .await
-            .context("Failed to fetch tag object")?
-            .json()
-            .await
-            .context("Failed to parse tag object JSON")?;
-
-        Ok(git_tag.object.sha)
-    } else {
-        // Lightweight tag: points directly to commit
-        Ok(git_ref.object.sha)
-    }
 }
 
 /// Download progress information
@@ -303,7 +246,9 @@ pub async fn download_update_with_progress(
         .context("SHA256 digest not found for release asset")?;
 
     info!("Downloading from: {}", asset.browser_download_url);
-    let mut response = reqwest::get(&asset.browser_download_url)
+    let mut response = client()?
+        .get(&asset.browser_download_url)
+        .send()
         .await
         .context("Failed to download update")?;
 
@@ -408,7 +353,7 @@ pub fn update_file_exists() -> bool {
 mod tests {
     use super::*;
 
-    fn make_stable_release(tag: &str) -> GitHubRelease {
+    fn release(tag: &str) -> GitHubRelease {
         GitHubRelease {
             tag_name: tag.to_string(),
             assets: vec![],
@@ -416,122 +361,85 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_get_release_version_stable() {
-        let release = make_stable_release("v0.29.0");
-        let version = get_release_version(&release).await;
-        assert_eq!(version, "v0.29.0");
+    #[test]
+    fn version_is_the_tag_verbatim() {
+        assert_eq!(
+            get_release_version(&release("v1.0.1-flip.14")),
+            "v1.0.1-flip.14"
+        );
     }
 
-    #[tokio::test]
-    async fn test_stable_version_format_matches_semver() {
-        let release = make_stable_release("v1.2.3");
-        let version = get_release_version(&release).await;
-        // Should match semver format: vX.Y.Z
+    #[test]
+    fn parses_fork_tags_and_plain_semver() {
+        assert_eq!(parse_version("v1.0.1-flip.14"), Some((1, 0, 1, 14)));
+        assert_eq!(parse_version("v1.0.1"), Some((1, 0, 1, 0)));
+        assert_eq!(parse_version("1.2.3"), Some((1, 2, 3, 0)));
+        assert_eq!(parse_version("unknown"), None);
+        assert_eq!(parse_version("v1.0"), None);
+        assert_eq!(parse_version("v1.0.1.2"), None);
+        assert_eq!(parse_version("v1.0.1-flip.x"), None);
+    }
+
+    #[test]
+    fn newer_means_numerically_greater() {
+        assert!(is_newer("v1.0.1-flip.15", "v1.0.1-flip.14"));
         assert!(
-            version.starts_with('v'),
-            "Version should start with 'v': {}",
-            version
+            !is_newer("v1.0.1-flip.14", "v1.0.1-flip.15"),
+            "a downgrade is not an update"
         );
-        let version = version.trim_start_matches('v').to_string();
-        let parts: Vec<&str> = version.split('.').collect();
-        assert_eq!(parts.len(), 3);
-        assert!(parts[0].parse::<u32>().is_ok());
-        assert!(parts[1].parse::<u32>().is_ok());
-        assert!(parts[2].parse::<u32>().is_ok());
+        assert!(!is_newer("v1.0.1-flip.14", "v1.0.1-flip.14"));
+        // A new base version beats any build of the old one
+        assert!(is_newer("v1.0.2", "v1.0.1-flip.99"));
+        assert!(is_newer("v1.0.1-flip.1", "v1.0.1"));
+        // Build numbers compare as numbers, not strings
+        assert!(is_newer("v1.0.1-flip.100", "v1.0.1-flip.99"));
+    }
+
+    #[test]
+    fn unparseable_versions_fall_back_to_inequality() {
+        assert!(is_newer("v1.0.1-flip.14", "unknown"));
+        assert!(!is_newer("unknown", "unknown"));
+    }
+
+    #[test]
+    fn old_channel_names_read_as_on() {
+        for old in ["\"Stable\"", "\"Nightly\"", "\"On\""] {
+            let channel: UpdateChannel = serde_json::from_str(old).unwrap();
+            assert_eq!(channel, UpdateChannel::On, "{old}");
+        }
+        let channel: UpdateChannel = serde_json::from_str("\"Off\"").unwrap();
+        assert_eq!(channel, UpdateChannel::Off);
     }
 
     #[tokio::test]
     #[ignore] // Requires network access
-    async fn test_check_for_update_stable() {
-        let result = check_for_update(UpdateChannel::Stable).await;
+    async fn test_check_for_update() {
+        let result = check_for_update(UpdateChannel::On).await;
         assert!(result.is_ok(), "Failed to check for update: {:?}", result);
     }
 
     #[tokio::test]
     #[ignore] // Requires network access
-    async fn test_check_for_update_nightly() {
-        let result = check_for_update(UpdateChannel::Nightly).await;
-        assert!(result.is_ok(), "Failed to check for update: {:?}", result);
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires network access
-    async fn test_stable_release_version_format() {
-        let release = get_latest_stable_release()
+    async fn test_get_latest_release() {
+        let release = get_latest_release()
             .await
-            .expect("Failed to get stable release");
-
-        let version = get_release_version(&release).await;
-        println!("Stable version: {}", version);
-
-        // Stable should not have a dash (no commit hash)
+            .expect("Failed to get latest release");
+        assert!(!release.tag_name.is_empty());
         assert!(
-            version.starts_with('v'),
-            "Stable version should start with 'v': {}",
-            version
+            parse_version(&release.tag_name).is_some(),
+            "tag {} is not a version this fork publishes",
+            release.tag_name
         );
-
-        // Should be semver format
-        let parts: Vec<&str> = version.split('.').collect();
-        assert_eq!(
-            parts.len(),
-            3,
-            "Version should have 3 parts (semver): {}",
-            version
-        );
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires network access
-    async fn test_nightly_release_version_format() {
-        let release = get_latest_nightly_release()
-            .await
-            .expect("Failed to get nightly release");
-
-        let version = get_release_version(&release).await;
-        println!("Nightly version: {}", version);
-
-        // Nightly should have format: nightly-HHHHHHH
+        let asset = release
+            .assets
+            .iter()
+            .find(|a| a.name == RELEASE_FILE)
+            .expect("release asset");
         assert!(
-            version.starts_with("nightly"),
-            "Nightly version should start with 'nightly-': {}",
-            version
+            asset
+                .digest
+                .as_deref()
+                .is_some_and(|d| d.starts_with("sha256:"))
         );
-
-        let parts: Vec<&str> = version.split('-').collect();
-        assert_eq!(
-            parts.len(),
-            2,
-            "Nightly version should have base and hash: {}",
-            version
-        );
-
-        // Commit hash should be 7 characters
-        assert_eq!(
-            parts[1].len(),
-            7,
-            "Commit hash should be 7 characters: {}",
-            parts[1]
-        );
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires network access
-    async fn test_get_latest_stable_release() {
-        let result = get_latest_stable_release().await;
-        assert!(result.is_ok(), "Failed to get latest release: {:?}", result);
-
-        let release = result.unwrap();
-        assert!(!release.tag_name.is_empty(), "Tag name should not be empty");
-        assert!(!release.assets.is_empty(), "Assets should not be empty");
-
-        // Check if the expected asset exists
-        let asset = release.assets.iter().find(|a| a.name == RELEASE_FILE);
-        assert!(asset.is_some());
-
-        // Check if SHA256 digest exists
-        let asset = asset.unwrap();
-        assert!(asset.digest.as_ref().unwrap().starts_with("sha256:"));
     }
 }

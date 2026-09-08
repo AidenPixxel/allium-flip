@@ -52,8 +52,7 @@ impl From<usize> for UpdateChannel {
     fn from(value: usize) -> Self {
         match value {
             0 => UpdateChannel::Off,
-            1 => UpdateChannel::Stable,
-            2 => UpdateChannel::Nightly,
+            1 => UpdateChannel::On,
             _ => UpdateChannel::Off,
         }
     }
@@ -138,8 +137,7 @@ impl SystemUpdate {
             update_channel as usize,
             vec![
                 locale.t("settings-system-update-channel-off"),
-                locale.t("settings-system-update-channel-stable"),
-                locale.t("settings-system-update-channel-nightly"),
+                locale.t("settings-system-update-channel-on"),
             ],
             Alignment::Right,
         )));
@@ -242,7 +240,7 @@ impl SystemUpdate {
             match ota::check_for_update(channel).await {
                 Ok(Some(release)) => {
                     // Resolve version string (fetches commit hash for nightly)
-                    let version = ota::get_release_version(&release).await;
+                    let version = ota::get_release_version(&release);
                     let _ = tx.send(VersionCheckEvent::Found { release, version });
                 }
                 Ok(None) => {
@@ -378,7 +376,7 @@ impl SystemUpdate {
 
                 match ota::check_for_update(self.update_channel).await {
                     Ok(Some(release)) => {
-                        let version = ota::get_release_version(&release).await;
+                        let version = ota::get_release_version(&release);
                         info!("Update available: v{}", version);
                         self.latest_version = Some(version);
                         self.update_latest_version_label();

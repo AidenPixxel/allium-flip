@@ -194,16 +194,15 @@ publishing before pushing. `Settings → System Update` shows the installed vers
 
 ---
 
-## Why "System Update" on the device does not do this
+## System Update on the device
 
-The screen exists and is reachable, but it cannot work in this build for two reasons:
+**Settings → System Update** checks this fork's GitHub releases over Wi-Fi and installs the latest
+one — the same archive the push script uploads, downloaded by the handheld itself and verified
+against the SHA-256 GitHub publishes for it. Use it when the handheld has internet access; use the
+push route above when it does not, or to install a build that was never released.
 
-1. `reqwest` is compiled with no TLS backend, so `https://api.github.com` is unreachable from the
-   handheld — there is nothing to perform the handshake.
-2. `GITHUB_REPOSITORY` in `crates/allium-launcher/src/ota.rs` still points at upstream
-   `goweiwen/Allium`. Left as-is, an update would restore every core trimmed from this build and
-   replace its binaries with stock ones — which is why the update channel defaults to **Off**.
+"Update available" means a *newer* version, not merely a different one. Tags are compared
+numerically, so a handheld running a side-branch build newer than the latest release is not offered
+a downgrade.
 
-Doing the download on a computer, where TLS already works, and uploading over plain HTTP on the LAN
-avoids both. Making the on-device screen work needs a TLS stack added to the armv7 cross-build and
-the repository re-pointed; until then, use the Wi-Fi push above.
+**Update Channel** is On by default. Set it Off to stop the handheld contacting GitHub at all.
