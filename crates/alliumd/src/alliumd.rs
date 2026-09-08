@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
@@ -99,6 +100,8 @@ pub struct AlliumD<P: Platform> {
     locale: Locale,
     power_settings: PowerSettings,
     osd: Osd<P>,
+    /// When the child last exited, within `CRASH_LOOP_WINDOW`; see `throttle_crash_loop`
+    child_exits: VecDeque<Instant>,
 }
 
 impl AlliumDState {
@@ -154,6 +157,35 @@ async fn sleep_until_wake(deadline: Option<tokio::time::Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => std::future::pending().await,
+    }
+}
+
+/// Child exits within this window count toward the crash-loop guard...
+const CRASH_LOOP_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+/// ...and this many of them means the child is not coming up: pause before the next attempt
+const CRASH_LOOP_EXITS: usize = 3;
+const CRASH_LOOP_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
+/// How long to wait before trying again when the spawn itself fails
+const RESPAWN_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// `spawn_main`, retried until it succeeds.
+///
+/// Failing to start the launcher is not something the daemon can recover from by exiting: the boot
+/// script answers a dead daemon with a reboot, which lands straight back here. Waiting and trying
+/// again is strictly better -- the card may still be settling after an update -- and keeps the
+/// device answering the power button meanwhile.
+async fn respawn_main() -> Child {
+    loop {
+        match spawn_main().await {
+            Ok(child) => return child,
+            Err(e) => {
+                error!(
+                    "could not start the launcher: {}; trying again in {:?}",
+                    e, RESPAWN_RETRY
+                );
+                tokio::time::sleep(RESPAWN_RETRY).await;
+            }
+        }
     }
 }
 
@@ -248,7 +280,7 @@ impl AlliumD<DefaultPlatform> {
         // stored values, so the active profile survives a reboot.
         platform.set_display_settings(&mut DisplaySettings::load()?.active().effective())?;
 
-        let main = spawn_main().await?;
+        let main = respawn_main().await;
         let locale = Locale::new(&LocaleSettings::load()?.lang);
 
         // One load per process: font data is Arc'd, so clones share it
@@ -271,6 +303,7 @@ impl AlliumD<DefaultPlatform> {
             locale,
             power_settings,
             osd: Osd::new(styles),
+            child_exits: VecDeque::new(),
         })
     }
 
@@ -293,7 +326,11 @@ impl AlliumD<DefaultPlatform> {
             // Charging at this point means the device was booted by the charger being plugged in
             // (or by the user pressing Power with the cable already attached).
             let mut battery = self.platform.battery()?;
-            battery.update()?;
+            // Every error out of this function is a reboot, so a single failed reading -- axp_test
+            // slow to answer, say -- must not be one. Not charging is the safe assumption.
+            if let Err(e) = battery.update() {
+                warn!("failed to read the battery at startup: {}", e);
+            }
             if battery.charging() {
                 match self.charging_boot_action() {
                     ChargingBootAction::ChargeScreen => self.handle_charging(true).await?,
@@ -347,7 +384,10 @@ impl AlliumD<DefaultPlatform> {
                 };
                 tokio::select! {
                     key_event = self.platform.poll() => {
-                        self.handle_key_event(key_event).await?;
+                        // A failed myctl spawn on a volume press is not worth a reboot
+                        if let Err(e) = self.handle_key_event(key_event).await {
+                            error!("failed to handle key event: {}", e);
+                        }
                     }
                     _ = sleep_until_wake(self.osd.next_wake()) => {
                         if let Err(e) = self.osd.tick() {
@@ -376,10 +416,14 @@ impl AlliumD<DefaultPlatform> {
                     _ = self.main.wait() => {
                         if !self.is_terminating {
                             info!("main process terminated, recording play time");
-                            self.update_play_time()?;
-
-                            GameInfo::delete()?;
-                            self.main = spawn_main().await?;
+                            if let Err(e) = self.update_play_time() {
+                                error!("failed to record play time: {}", e);
+                            }
+                            if let Err(e) = GameInfo::delete() {
+                                error!("failed to clear the game info: {}", e);
+                            }
+                            self.throttle_crash_loop().await;
+                            self.main = respawn_main().await;
                         }
                     }
                     _ = sigint.recv() => self.handle_quit().await?,
@@ -392,7 +436,9 @@ impl AlliumD<DefaultPlatform> {
         loop {
             tokio::select! {
                 key_event = self.platform.poll() => {
-                    self.handle_key_event(key_event).await?;
+                    if let Err(e) = self.handle_key_event(key_event).await {
+                        error!("failed to handle key event: {}", e);
+                    }
                 }
                 _ = sleep_until_wake(self.osd.next_wake()) => {
                     if let Err(e) = self.osd.tick() {
@@ -754,6 +800,28 @@ impl AlliumD<DefaultPlatform> {
     }
 
     #[allow(unused)]
+    /// Pauses before a respawn when the child keeps dying.
+    ///
+    /// A launcher that fails on startup would otherwise be restarted in a tight loop forever, the
+    /// screen flashing, with nothing the user can do -- the only other way out is a reboot, which
+    /// runs the same loop. A pause between attempts keeps the device answering the power button
+    /// and leaves a log that can be read rather than one that scrolls past.
+    async fn throttle_crash_loop(&mut self) {
+        let now = Instant::now();
+        self.child_exits
+            .retain(|at| now.duration_since(*at) < CRASH_LOOP_WINDOW);
+        self.child_exits.push_back(now);
+        if self.child_exits.len() >= CRASH_LOOP_EXITS {
+            warn!(
+                "main process exited {} times in {:?}; waiting {:?} before starting it again",
+                self.child_exits.len(),
+                CRASH_LOOP_WINDOW,
+                CRASH_LOOP_BACKOFF
+            );
+            tokio::time::sleep(CRASH_LOOP_BACKOFF).await;
+        }
+    }
+
     fn update_play_time(&self) -> Result<()> {
         if !self.is_ingame() {
             return Ok(());
