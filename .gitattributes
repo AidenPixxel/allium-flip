@@ -1,0 +1,28 @@
+# Everything that runs on the handheld goes through busybox sh, which rejects CRLF with
+# ": not found". The index is LF already; these rules keep a Windows checkout (core.autocrlf)
+# from ever committing CRLF into a file the device reads.
+*.sh                         text eol=lf
+static/.tmp_update/updater   text eol=lf
+Makefile                     text eol=lf
+*.mk                         text eol=lf
+*.ftl                        text eol=lf
+*.toml                       text eol=lf
+Cargo.lock                   text eol=lf
+*.cfg                        text eol=lf
+*.rmp                        text eol=lf
+*.opt                        text eol=lf
+*.info                       text eol=lf
+*.json                       text eol=lf
+*.yml                        text eol=lf
+*.yaml                       text eol=lf
+
+# Never normalise binaries, some of which ship without an extension
+*.so   -text
+*.ko   -text
+*.png  -text
+*.jpg  -text
+*.gif  -text
+*.ttf  -text
+*.otf  -text
+*.zip  -text
+*.db   -text
