@@ -95,6 +95,14 @@ in a git-ignored `local.mk`.
   reboot when `alliumd` exits — the way out of a reboot loop.
 - Apps → Terminal is a shell on the device.
 
+## Troubleshooting
+
+**Changes made in RetroArch's own menu don't survive closing the game.** RetroArch writes its
+`retroarch.cfg` back only when `config_save_on_exit` is on; cards set up with Onion-derived defaults
+have it off. In RetroArch: Settings → Configuration → **Save Configuration on Quit** → On, then Main
+Menu → Configuration File → **Save Current Configuration** once. Until this fork's `v1.0.1-flip.39`,
+games started with **Restart** also discarded every save regardless of that setting.
+
 ## Acknowledgements
 
 Allium is only possible thanks to the Miyoo Mini community, including but not limited to:

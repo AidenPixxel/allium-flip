@@ -6,6 +6,13 @@ by what changed rather than by run number; the commit log has the detail.
 ## Unreleased
 
 ### Fixed
+- Games started with **Restart** kept RetroArch's config on tmpfs, so every setting saved from
+  RetroArch's menu during such a run -- hotkeys included -- was discarded on exit. The launcher now
+  carries the saved config back with auto-load restored.
+
+## v1.0.1-flip.38 -- 2026-09-08
+
+### Fixed
 - Settings files (`power.json`, `wifi.json`, `locale.json`, `current_game`, `update.json`) are kept
   as `.bak` instead of deleted when they fail to parse, and written atomically so a power cut cannot
   leave a truncated one behind.
