@@ -583,10 +583,14 @@ ON CONFLICT(path) DO UPDATE SET play_count = play_count + 1;",
         Ok(())
     }
 
-    /// Deletes all games that have no play time, play count.
+    /// Deletes all games that have no play time, play count, or per-game setting.
+    ///
+    /// A row carrying a performance mode is something the user chose, so it survives even if the
+    /// game has not been played long enough to record a session -- set from the in-game menu and
+    /// quit straight away, say.
     pub fn delete_all_unplayed_games(&self) -> Result<()> {
         self.conn.as_ref().unwrap().execute(
-            "DELETE FROM games WHERE last_played = 0 AND play_time = 0",
+            "DELETE FROM games WHERE last_played = 0 AND play_time = 0 AND performance_mode IS NULL",
             [],
         )?;
 
