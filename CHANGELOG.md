@@ -39,8 +39,8 @@ by what changed rather than by run number; the commit log has the detail.
 ### Added
 - **System Update** on the device works: TLS via `rustls` with bundled roots (upstream `392f7f2`),
   pointed at this fork's releases.
-- CI runs clippy in both the host and `miyoo` configurations and builds the simulator, advisory
-  until their first clean run.
+- CI runs clippy in both the host and `miyoo` configurations and gates the build on it; it also
+  builds the simulator.
 - `.gitattributes` pins LF for every file the handheld reads.
 - This changelog, and a README describing the fork rather than upstream.
 

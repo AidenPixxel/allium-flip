@@ -80,8 +80,8 @@ There is none for `alliumd`. CI builds the simulator to catch breakage but does 
 ### Building and CI
 `make all` builds Allium and RetroArch and assembles `dist/`. CI runs `cargo fmt --check`, the tests,
 clippy in both the host and `miyoo` configurations, and `cargo deny`. A push to `main` that builds
-publishes a release tagged `v<version>-flip.<run>`; the format check and tests gate the build, and
-clippy is advisory until its first clean run.
+publishes a release tagged `v<version>-flip.<run>`; the format check, tests and clippy gate the
+build.
 
 ### Deploying to hardware
 Over Wi-Fi: `scripts/push-update.sh <ip>`, or `make push DEVICE=<ip>` — see

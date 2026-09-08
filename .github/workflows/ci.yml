@@ -69,10 +69,8 @@ jobs:
   lint:
     name: Clippy
     runs-on: ubuntu-latest
-    # Advisory until the first run is clean. Five crates deny clippy::all, but nothing ever ran
-    # clippy before this job existed -- the dev machine cannot -- so the first pass will find
-    # things. Turn continue-on-error off once it is green.
-    continue-on-error: true
+    # Gates the release, through `needs` on the build job. Five crates deny clippy::all, and until
+    # this job existed nothing ran clippy at all -- the dev machine cannot.
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -125,9 +123,8 @@ jobs:
   simulator:
     name: Build Simulator
     runs-on: ubuntu-latest
-    # Advisory: nothing had built the simulator since the fork, so it may not compile at all. This
-    # job exists to find out, and to notice when a change breaks it.
-    continue-on-error: true
+    # Fails visibly when a change breaks the simulator, but does not gate the release: it is a
+    # development convenience, and a host-only dependency breaking should not hold a device build.
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -146,7 +143,7 @@ jobs:
     # Gates the release on fmt and tests: this job publishes, so it must not run for a tree
     # those would reject. `deny` is left out deliberately -- a newly published advisory can
     # fail it without anything in the tree having changed.
-    needs: [style, test]
+    needs: [style, test, lint]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
