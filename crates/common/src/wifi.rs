@@ -93,8 +93,7 @@ impl WiFiSettings {
     }
 
     pub fn save(&self) -> Result<()> {
-        let json = serde_json::to_string(&self).unwrap();
-        File::create(ALLIUM_WIFI_SETTINGS.as_path())?.write_all(json.as_bytes())?;
+        state_file::save(ALLIUM_WIFI_SETTINGS.as_path(), self)?;
         if let Err(e) = self.update_wpa_supplicant_conf() {
             warn!("failed to update wpa_supplicant.conf: {}", e);
         }
@@ -130,18 +129,19 @@ impl WiFiSettings {
     fn update_wpa_supplicant_conf(&self) -> Result<()> {
         #[cfg(feature = "miyoo")]
         {
+            // An empty password means an open network, and `psk=""` is not "no key" to
+            // wpa_supplicant -- it is an invalid passphrase, and it rejects the whole file for it.
+            // `scan_ssid=1` probes for the network by name, which is what finds a hidden one.
+            let security = if self.password.is_empty() {
+                "\tkey_mgmt=NONE\n".to_string()
+            } else {
+                format!("\tpsk=\"{}\"\n", escape(&self.password))
+            };
             let mut file = File::create("/appconfigs/wpa_supplicant.conf")?;
             write!(
                 file,
-                r#"ctrl_interface=/var/run/wpa_supplicant
-update_config=1
-
-network={{
-	ssid="{ssid}"
-	psk="{password}"
-}}"#,
-                ssid = self.ssid.replace('"', "\\\""),
-                password = self.password.replace('"', "\\\""),
+                "ctrl_interface=/var/run/wpa_supplicant\nupdate_config=1\n\nnetwork={{\n\tssid=\"{ssid}\"\n\tscan_ssid=1\n{security}}}\n",
+                ssid = escape(&self.ssid),
             )?;
         }
         Ok(())
@@ -191,6 +191,13 @@ network={{
     }
 
     pub fn set_password(&mut self, password: String) -> Result<()> {
+        // Nothing here can reject it, but the log should say why the network never comes up
+        let len = password.chars().count();
+        if len > 0 && !(8..=63).contains(&len) {
+            warn!(
+                "Wi-Fi passphrases must be 8 to 63 characters; wpa_supplicant will refuse this one"
+            );
+        }
         self.password = password;
         if self.wifi {
             self.set_wifi(self.wifi)?;
@@ -606,6 +613,12 @@ pub async fn wait_for_wifi() -> Result<()> {
         .await
         .ok();
     Ok(())
+}
+
+/// Quotes a value for a wpa_supplicant.conf double-quoted string
+#[cfg(feature = "miyoo")]
+fn escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 pub fn ip_address() -> Option<String> {
