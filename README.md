@@ -48,6 +48,10 @@ Allium supports both the Miyoo Mini, Miyoo Mini Plus,and Miyoo Mini Flip on the 
 3. Eject the disk (**important!**).
 
 ### Updating
+
+No need to format — an update only replaces a few folders. See [UPDATING.md](UPDATING.md) for the
+Wi-Fi route, which needs no SD card at all.
+
 1. Download the latest release and extract these folders into your SD card. e.g. `E:/`:
     - .allium
     - .tmp_update
