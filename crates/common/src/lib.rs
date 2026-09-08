@@ -14,6 +14,7 @@ pub mod platform;
 pub mod power;
 pub mod resources;
 pub mod retroarch;
+pub mod retroarch_config;
 pub mod stylesheet;
 pub mod view;
 pub mod wifi;
