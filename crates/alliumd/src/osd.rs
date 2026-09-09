@@ -46,13 +46,18 @@ const FALLBACK_INDEX: usize = (b'?' - b' ') as usize;
 /// cell tall plus the shadow. Full width, because the text changes length while a key repeats and
 /// a rect that changed would mean rebuilding the stamper mid-repeat.
 ///
-/// The bottom of the screen is the first region the panel scans each frame, which is why the old
-/// plate sat in the middle. That mattered when this stamped over RetroArch; RetroArch now draws its
-/// own message, and the stamper only serves Allium's own apps, which repaint at ~6fps on input.
-fn text_band(width: u32, height: u32) -> Rect {
+/// `bottom_inset` is what the app underneath keeps for itself at the bottom of the screen -- the
+/// button hint strip the launcher and the in-game menu both draw. RetroArch has no such strip, so
+/// its own message sits right at the bottom edge; here the line has to clear the hints or it lands
+/// on top of them.
+///
+/// The bottom of the screen is also the first region the panel scans each frame, which is why the
+/// old plate sat in the middle. That mattered when this stamped over RetroArch; RetroArch now draws
+/// its own message, and the stamper only serves Allium's own apps, which repaint at ~6fps on input.
+fn text_band(width: u32, height: u32, bottom_inset: u32) -> Rect {
     Rect::new(
         LEFT_MARGIN as i32,
-        height.saturating_sub(BOTTOM_MARGIN + BAND_H) as i32,
+        height.saturating_sub(bottom_inset + BOTTOM_MARGIN + BAND_H) as i32,
         width.saturating_sub(2 * LEFT_MARGIN),
         BAND_H,
     )
@@ -123,9 +128,9 @@ struct Surface<P: Platform> {
 }
 
 impl<P: Platform> Surface<P> {
-    fn new(platform: &mut P) -> Result<Self> {
+    fn new(platform: &mut P, bottom_inset: u32) -> Result<Self> {
         let mut display = platform.display_partial()?;
-        let band = text_band(display.width(), display.height());
+        let band = text_band(display.width(), display.height(), bottom_inset);
         // Nothing outside the band is ever drawn or restored, so read no more of the frame
         display.read_rect(band)?;
         display.save()?;
@@ -180,15 +185,19 @@ struct Shown<P: Platform> {
 /// The one-line indicator drawn over whatever app owns the framebuffer.
 pub struct Osd<P: Platform> {
     shown: Option<Shown<P>>,
-}
-
-impl<P: Platform> Default for Osd<P> {
-    fn default() -> Self {
-        Self { shown: None }
-    }
+    bottom_inset: u32,
 }
 
 impl<P: Platform> Osd<P> {
+    /// `bottom_inset` is the strip the app underneath keeps at the bottom of the screen for its
+    /// button hints; see [`text_band`].
+    pub fn new(bottom_inset: u32) -> Self {
+        Self {
+            shown: None,
+            bottom_inset,
+        }
+    }
+
     /// When `tick()` is next due, or `None` while hidden -- nothing to wake for.
     pub fn next_wake(&self) -> Option<Instant> {
         self.shown.as_ref().map(|shown| match shown.refresh {
@@ -229,7 +238,7 @@ impl<P: Platform> Osd<P> {
         // Consuming the old state stops its stamper before the new text is drawn
         let mut surface = match self.shown.take() {
             Some(shown) => shown.surface,
-            None => Surface::new(platform)?,
+            None => Surface::new(platform, self.bottom_inset)?,
         };
 
         surface.draw(text, !repainting)?;
@@ -293,6 +302,8 @@ mod tests {
 
     const WIDTH: u32 = 640;
     const HEIGHT: u32 = 480;
+    /// What the launcher's button hints reserve with the default theme
+    const INSET: u32 = 44;
 
     fn premultiplied(r: u8, g: u8, b: u8) -> PremultipliedColorU8 {
         Color::new(r, g, b).into()
@@ -301,7 +312,7 @@ mod tests {
     fn rendered(text: &str, background: PremultipliedColorU8) -> Pixmap {
         let mut pixmap = Pixmap::new(WIDTH, HEIGHT).expect("pixmap");
         pixmap.pixels_mut().fill(background);
-        draw_text(&mut pixmap.as_mut(), text_band(WIDTH, HEIGHT), text);
+        draw_text(&mut pixmap.as_mut(), text_band(WIDTH, HEIGHT, INSET), text);
         pixmap
     }
 
@@ -311,9 +322,17 @@ mod tests {
     }
 
     #[test]
-    fn band_rests_on_the_bottom_margin() {
-        let band = text_band(WIDTH, HEIGHT);
-        assert_eq!((band.x, band.y, band.w, band.h), (12, 450, 616, 26));
+    fn band_sits_above_whatever_the_app_reserves() {
+        // Right at the bottom edge when nothing is reserved, as RetroArch draws it
+        let flush = text_band(WIDTH, HEIGHT, 0);
+        assert_eq!((flush.x, flush.y, flush.w, flush.h), (12, 450, 616, 26));
+        // ...and clear of the button hints when there are any
+        let band = text_band(WIDTH, HEIGHT, INSET);
+        assert_eq!((band.x, band.y, band.w, band.h), (12, 406, 616, 26));
+        assert!(
+            band.bottom() <= (HEIGHT - INSET) as i32,
+            "the line would land on the button hints"
+        );
     }
 
     #[test]
@@ -322,7 +341,7 @@ mod tests {
         let white = premultiplied(0xFF, 0xFF, 0xFF);
         let black = premultiplied(0, 0, 0);
         let text = "Volume  ############--------  60%";
-        let band = text_band(WIDTH, HEIGHT);
+        let band = text_band(WIDTH, HEIGHT, INSET);
         let pixmap = rendered(text, background);
         let ink_right = band.x + (text.chars().count() * ADVANCE) as i32;
         let mut whites = 0;
@@ -348,7 +367,7 @@ mod tests {
     fn clips_a_line_longer_than_the_band() {
         let background = premultiplied(10, 20, 30);
         let white = premultiplied(0xFF, 0xFF, 0xFF);
-        let band = text_band(WIDTH, HEIGHT);
+        let band = text_band(WIDTH, HEIGHT, INSET);
         let pixmap = rendered(&"#".repeat(200), background);
         let mut whites = 0;
         for y in 0..HEIGHT {
@@ -376,7 +395,7 @@ mod tests {
     #[test]
     fn a_display_too_small_for_the_band_draws_nothing() {
         let mut pixmap = Pixmap::new(20, 10).expect("pixmap");
-        draw_text(&mut pixmap.as_mut(), text_band(20, 10), "x");
+        draw_text(&mut pixmap.as_mut(), text_band(20, 10, INSET), "x");
     }
 
     #[test]

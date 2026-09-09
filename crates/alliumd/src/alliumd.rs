@@ -295,6 +295,12 @@ impl AlliumD<DefaultPlatform> {
 
         let styles = Stylesheet::load()?;
 
+        // The launcher and the in-game menu both keep this much of the bottom of the screen for
+        // their button hints, so the indicator sits above it rather than on top of them. Taken
+        // from the theme, matching ButtonHints::ensure_layout, so a bigger font still clears.
+        let osd_inset = styles.button_size().max(styles.button_hint_font_size()) as u32
+            + styles.ui.margin_x.max(0) as u32;
+
         // Spawn the persistent menu thread at startup
         let menu = MenuHandle::new(styles);
 
@@ -311,7 +317,7 @@ impl AlliumD<DefaultPlatform> {
             state,
             locale,
             power_settings,
-            osd: Osd::default(),
+            osd: Osd::new(osd_inset),
             child_exits: VecDeque::new(),
         })
     }
