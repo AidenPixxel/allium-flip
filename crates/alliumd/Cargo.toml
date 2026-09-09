@@ -22,6 +22,7 @@ nix = { workspace = true, features = ["signal", "process"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 simple_logger = { workspace = true, default-features = false }
+tiny-skia.workspace = true
 tokio = { workspace = true, features = ["full"] }
 
 [dependencies.common]

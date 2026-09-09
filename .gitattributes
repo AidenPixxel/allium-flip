@@ -17,6 +17,8 @@ Cargo.lock                   text eol=lf
 *.yaml                       text eol=lf
 # Applied with `patch` inside the RetroArch build; a CRLF hunk would not match
 *.patch                      text eol=lf
+# Hashed by scripts/fonts/bdf_to_rust.py into the generated table's header
+*.bdf                        text eol=lf
 
 # Never normalise binaries, some of which ship without an extension
 *.so   -text

@@ -10,7 +10,14 @@ by what changed rather than by run number; the commit log has the detail.
   RetroArch as a `SHOW_MSG`, which RetroArch draws inside the frame it presents; stamping the same
   pixels into the framebuffer from outside always raced the game's next frame, which flips without
   vsync. Needs the bundled RetroArch patch that makes `SHOW_MSG` replace the previous message rather
-  than queue behind it. Other emulators and the launcher keep the drawn plate.
+  than queue behind it.
+
+### Changed
+- The indicator alliumd draws itself — in the launcher, the in-game menu and Allium's own apps — now
+  looks exactly like RetroArch's in-game message: one line of white 2× bitmap text with a black drop
+  shadow at the bottom left, no plate or icons, shown for three seconds. Same key press, same look,
+  wherever you are. The font is Spleen 6×12 (BSD 2-Clause; licence shipped in
+  `.allium/fonts/licenses/`), converted into the binary by `scripts/fonts/bdf_to_rust.py`.
 - Games started with **Restart** kept RetroArch's config on tmpfs, so every setting saved from
   RetroArch's menu during such a run -- hotkeys included -- was discarded on exit. The launcher now
   carries the saved config back with auto-load restored.

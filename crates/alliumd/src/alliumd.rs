@@ -31,7 +31,7 @@ use common::database::Database;
 use common::game_info::GameInfo;
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
 
-use crate::osd::{Osd, OsdContent, OsdKind};
+use crate::osd::Osd;
 
 #[cfg(unix)]
 use {
@@ -86,6 +86,23 @@ impl MenuHandle {
             _handle: handle,
         }
     }
+}
+
+/// Which control the indicator reports
+#[derive(Debug, Clone, Copy)]
+enum OsdKind {
+    Volume,
+    Brightness,
+    DisplayProfile,
+}
+
+/// What the indicator's line says after its label
+#[derive(Debug)]
+enum OsdContent {
+    /// A level, shown as a bar and a percentage
+    Bar(f32),
+    /// A name
+    Label(String),
 }
 
 pub struct AlliumD<P: Platform> {
@@ -276,11 +293,10 @@ impl AlliumD<DefaultPlatform> {
         let main = respawn_main().await;
         let locale = Locale::new(&LocaleSettings::load()?.lang);
 
-        // One load per process: font data is Arc'd, so clones share it
         let styles = Stylesheet::load()?;
 
         // Spawn the persistent menu thread at startup
-        let menu = MenuHandle::new(styles.clone());
+        let menu = MenuHandle::new(styles);
 
         platform.daemon();
 
@@ -295,7 +311,7 @@ impl AlliumD<DefaultPlatform> {
             state,
             locale,
             power_settings,
-            osd: Osd::new(styles),
+            osd: Osd::default(),
             child_exits: VecDeque::new(),
         })
     }
@@ -956,18 +972,19 @@ impl AlliumD<DefaultPlatform> {
         // stamped into its framebuffer from here always can: the driver flips without vsync and
         // overwrites the page being scanned at an arbitrary phase, which no repaint timing wins
         // reliably. Three attempts at that timing preceded this.
+        let text = self.osd_text(kind, &content);
         if self.retroarch_in_foreground() {
             self.hide_osd();
-            let text = self.osd_text(kind, &content);
             tokio::spawn(async move {
                 RetroArchCommand::ShowMsg(text).send_or_log().await;
             });
             return;
         }
 
+        // Everywhere else the same line is drawn by hand, to look identical
         let repainting = self.foreground_repaints() && !self.menu_open;
         // Cosmetic only: a failed overlay must not take down the daemon
-        if let Err(e) = self.osd.show(&mut self.platform, kind, content, repainting) {
+        if let Err(e) = self.osd.show(&mut self.platform, &text, repainting) {
             error!("failed to show OSD: {}", e);
         }
     }

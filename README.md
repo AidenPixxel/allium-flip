@@ -83,6 +83,14 @@ clippy in both the host and `miyoo` configurations, and `cargo deny`. A push to 
 publishes a release tagged `v<version>-flip.<run>`; the format check, tests and clippy gate the
 build.
 
+### The indicator font
+The volume/brightness line alliumd draws is a bitmap font compiled into the binary,
+`crates/alliumd/src/osd_font.rs`, generated from Spleen 6×12 so it matches RetroArch's in-game
+message pixel for pixel in layout. To regenerate after updating the BDF:
+```
+scripts/fonts/bdf_to_rust.py scripts/fonts/spleen-6x12.bdf crates/alliumd/src/osd_font.rs --version <release>
+```
+
 ### Deploying to hardware
 Over Wi-Fi: `scripts/push-update.sh <ip>`, or `make push DEVICE=<ip>` — see
 [UPDATING.md](UPDATING.md). By card: `make deploy SDCARD_PATH=/path/to/card`, or put `SDCARD_PATH`
@@ -113,6 +121,7 @@ Allium is only possible thanks to the Miyoo Mini community, including but not li
 - [steward-fu](https://github.com/steward-fu): miraculous DraStic port
 - Early adopters and testers of Allium
 - [Icons8.com](https://icons8.com) for the icons used in the upstream wiki
+- [Frederic Cambus](https://github.com/fcambus/spleen) for Spleen, the bitmap font behind the on-screen indicator (BSD 2-Clause)
 
 ## Community
 
