@@ -916,7 +916,55 @@ impl AlliumD<DefaultPlatform> {
         self.show_osd_content(kind, OsdContent::Label(label));
     }
 
+    /// Whether the process drawing the screen is RetroArch, with Allium's own menu closed.
+    ///
+    /// Read from the game info file rather than through `GameInfo::load()`, which also spawns
+    /// swap-on.sh. `has_menu` is only ever set for RetroArch.
+    fn retroarch_in_foreground(&self) -> bool {
+        self.foreground_repaints()
+            && !self.menu_open
+            && state_file::load::<GameInfo>(ALLIUM_GAME_INFO.as_path(), "game info")
+                .is_some_and(|game| game.has_menu)
+    }
+
+    /// The indicator as one line of RetroArch's bitmap OSD font -- ASCII, about fifty columns.
+    fn osd_text(&self, kind: OsdKind, content: &OsdContent) -> String {
+        let label = self.locale.t(match kind {
+            OsdKind::Volume => "osd-volume",
+            OsdKind::Brightness => "osd-brightness",
+            OsdKind::DisplayProfile => "osd-display",
+        });
+        match content {
+            OsdContent::Bar(fraction) => {
+                const SEGMENTS: usize = 20;
+                let fraction = (*fraction).clamp(0.0, 1.0);
+                let filled = (fraction * SEGMENTS as f32).round() as usize;
+                format!(
+                    "{label}  {}{}  {}%",
+                    "#".repeat(filled),
+                    "-".repeat(SEGMENTS - filled),
+                    (fraction * 100.0).round() as u32
+                )
+            }
+            OsdContent::Label(name) => format!("{label}: {name}"),
+        }
+    }
+
     fn show_osd_content(&mut self, kind: OsdKind, content: OsdContent) {
+        // RetroArch draws OSD text inside the frame it presents -- in its flip callback, after the
+        // frame blit and before the page flip -- so a message handed to it cannot flicker. A plate
+        // stamped into its framebuffer from here always can: the driver flips without vsync and
+        // overwrites the page being scanned at an arbitrary phase, which no repaint timing wins
+        // reliably. Three attempts at that timing preceded this.
+        if self.retroarch_in_foreground() {
+            self.hide_osd();
+            let text = self.osd_text(kind, &content);
+            tokio::spawn(async move {
+                RetroArchCommand::ShowMsg(text).send_or_log().await;
+            });
+            return;
+        }
+
         let repainting = self.foreground_repaints() && !self.menu_open;
         // Cosmetic only: a failed overlay must not take down the daemon
         if let Err(e) = self.osd.show(&mut self.platform, kind, content, repainting) {

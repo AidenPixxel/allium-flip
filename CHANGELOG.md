@@ -6,6 +6,11 @@ by what changed rather than by run number; the commit log has the detail.
 ## Unreleased
 
 ### Fixed
+- The in-game volume and brightness indicator no longer flickers over RetroArch. It is now handed to
+  RetroArch as a `SHOW_MSG`, which RetroArch draws inside the frame it presents; stamping the same
+  pixels into the framebuffer from outside always raced the game's next frame, which flips without
+  vsync. Needs the bundled RetroArch patch that makes `SHOW_MSG` replace the previous message rather
+  than queue behind it. Other emulators and the launcher keep the drawn plate.
 - Games started with **Restart** kept RetroArch's config on tmpfs, so every setting saved from
   RetroArch's menu during such a run -- hotkeys included -- was discarded on exit. The launcher now
   carries the saved config back with auto-load restored.

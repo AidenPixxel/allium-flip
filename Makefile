@@ -100,7 +100,11 @@ retroarch: $(RETROARCH)/retroarch
 $(DIST_DIR)/RetroArch/retroarch: $(RETROARCH)/bin/retroarch_miyoo354
 	cp "$(RETROARCH)/bin/retroarch_miyoo354" "$(DIST_DIR)/RetroArch/retroarch"
 
-$(RETROARCH)/bin/retroarch_miyoo354:
+# Allium's own RetroArch patches ride on top of RetroArch-patch's: its Makefile applies every
+# patches/*.patch in sorted order, so dropping ours in beside them is enough. Its .is_patched stamp
+# means a build dir that was already patched will not pick up a new one -- `make clean` there first.
+$(RETROARCH)/bin/retroarch_miyoo354: $(wildcard patches/retroarch/*.patch)
+	cp patches/retroarch/*.patch $(RETROARCH)/patches/
 	docker run --rm -v /$(ROOT_DIR)/$(RETROARCH):/root/workspace $(TOOLCHAIN) bash -c "source /root/.bashrc; make all; chown -R \$$(stat -c '%u:%g' /root/workspace) /root/workspace"
 
 $(DIST_DIR)/.allium/bin/dufs:

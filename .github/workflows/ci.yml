@@ -162,9 +162,11 @@ jobs:
       # RetroArch is a Docker cross-build and by far the slowest step. Its make target lives
       # under third-party/, so restoring the binary makes `make all` skip it entirely. dufs and
       # collie are separate cargo workspaces that the rust-cache above does not cover.
-      - name: Key third-party caches on submodule revisions
+      # Allium's own RetroArch patches are part of the key too: a restored binary built without
+      # one would be silently wrong, and there is no other way to tell.
+      - name: Key third-party caches on submodule revisions and RetroArch patches
         id: thirdparty
-        run: echo "key=$(git submodule status | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        run: echo "key=$( (git submodule status; cat patches/retroarch/*.patch) | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Cache third-party builds
         uses: actions/cache@v4

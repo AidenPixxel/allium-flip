@@ -1,0 +1,23 @@
+SHOW_MSG replaces the message on screen instead of queueing behind it
+
+Allium hands its in-game volume and brightness indicator to RetroArch over the network command
+port, because RetroArch draws OSD text inside the frame it presents -- in the flip callback, after
+the frame blit and before the page flip -- and so cannot flicker, where stamping the same pixels
+into the framebuffer from outside always races the game's next frame.
+
+Upstream's SHOW_MSG pushes with flush=false: each message waits its full 180 frames before the
+next shows. Under a held volume key that fills the queue with stale values in a quarter of a
+second. RetroArch's own volume hotkey pushes with flush=true so the newest value shows at once;
+this makes SHOW_MSG behave the same way. Nothing else on the device sends it.
+
+--- a/command.c
++++ b/command.c
+@@ -732,7 +732,7 @@
+ 
+ bool command_show_osd_msg(command_t *cmd, const char* arg)
+ {
+-    runloop_msg_queue_push(arg, strlen(arg), 1, 180, false, NULL,
++    runloop_msg_queue_push(arg, strlen(arg), 1, 180, true, NULL,
+           MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
+     return true;
+ }

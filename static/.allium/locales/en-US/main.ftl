@@ -232,6 +232,11 @@ ingame-menu-performance-medium = Med
 ingame-menu-performance-high = High
 ingame-menu-performance-max = Max
 
+# The in-game indicator, drawn by RetroArch in its bitmap font: ASCII only, one line.
+osd-volume = Volume
+osd-brightness = Brightness
+osd-display = Display
+
 guide-button-search = Search
 guide-button-next = Next
 guide-button-prev = Prev
