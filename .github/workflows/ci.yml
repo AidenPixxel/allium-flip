@@ -175,8 +175,11 @@ jobs:
             third-party/RetroArch-patch/bin
             third-party/dufs/target
             third-party/collie/target
+          # Exact key only. A prefix fallback would restore a RetroArch binary built from a
+          # different submodule revision or without one of Allium's patches, and the Makefile
+          # target has no prerequisites to notice -- so it would ship. dufs and collie rebuild
+          # from scratch when the key changes, which is rare.
           key: thirdparty-${{ steps.thirdparty.outputs.key }}
-          restore-keys: thirdparty-
 
       # package-build stamps .allium/version.txt from `git describe --exact-match --tags`, so the
       # tag has to exist before the build or the About screen shows a nightly hash. run_number

@@ -103,9 +103,17 @@ $(DIST_DIR)/RetroArch/retroarch: $(RETROARCH)/bin/retroarch_miyoo354
 # Allium's own RetroArch patches ride on top of RetroArch-patch's: its Makefile applies every
 # patches/*.patch in sorted order, so dropping ours in beside them is enough. Its .is_patched stamp
 # means a build dir that was already patched will not pick up a new one -- `make clean` there first.
-$(RETROARCH)/bin/retroarch_miyoo354: $(wildcard patches/retroarch/*.patch)
+#
+# No prerequisite on the patch files on purpose. CI restores this binary from a cache keyed on the
+# patch contents, and the restored file is older than a fresh checkout, so an mtime prerequisite
+# would rebuild RetroArch on every run. The key is what invalidates it.
+#
+# Its patch loop only reports the last patch's status, so the verify script checks afterwards that
+# every Allium patch is really in the built tree; the chown runs regardless, then the status decides.
+$(RETROARCH)/bin/retroarch_miyoo354:
 	cp patches/retroarch/*.patch $(RETROARCH)/patches/
-	docker run --rm -v /$(ROOT_DIR)/$(RETROARCH):/root/workspace $(TOOLCHAIN) bash -c "source /root/.bashrc; make all; chown -R \$$(stat -c '%u:%g' /root/workspace) /root/workspace"
+	cp scripts/retroarch/verify-patches.sh $(RETROARCH)/allium-verify-patches.sh
+	docker run --rm -v /$(ROOT_DIR)/$(RETROARCH):/root/workspace $(TOOLCHAIN) bash -c "source /root/.bashrc; make all && sh allium-verify-patches.sh; status=\$$?; chown -R \$$(stat -c '%u:%g' /root/workspace) /root/workspace; exit \$$status"
 
 $(DIST_DIR)/.allium/bin/dufs:
 	cd third-party/dufs && LZMA_API_STATIC=1 cargo zigbuild --release --target=$(TARGET_TRIPLE).$(GLIBC_VERSION)
