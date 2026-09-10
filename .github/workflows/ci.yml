@@ -1,8 +1,20 @@
 name: CI
 
+# The device artifact is built exactly once per commit. A successful build on main publishes it
+# as a release straight away, rather than a tag triggering a second, identical build.
+permissions:
+  contents: write
+
 on:
   pull_request:
   push:
+    # Releases come from pushes to main, so a tag push would only rebuild the same tree.
+    # `branches` must be listed alongside tags-ignore: naming only one ref type makes GitHub
+    # skip the other entirely, which previously stopped CI running on branch pushes at all.
+    branches:
+      - '**'
+    tags-ignore:
+      - '**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -54,8 +66,84 @@ jobs:
           command: test
           args: --package common --package alliumd --package allium-launcher --package allium-menu --package myctl
 
+  lint:
+    name: Clippy
+    runs-on: ubuntu-latest
+    # Gates the release, through `needs` on the build job. Five crates deny clippy::all, and until
+    # this job existed nothing ran clippy at all -- the dev machine cannot.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Also registers a problem matcher, so findings show as annotations on the commit
+      - name: Install rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # The configuration the test job compiles. Output is kept for the comment below.
+      - name: cargo clippy
+        run: cargo clippy -p common -p alliumd -p allium-launcher -p allium-menu -p myctl --all-targets -- -D warnings 2>&1 | tee clippy-host.log
+
+      # The device configuration. Most of this fork's changes sit behind the miyoo feature, which
+      # the test job never compiles, so this is the only place they are type-checked before the
+      # armv7 build -- and the only linting they get at all. `always()` so a failure above does
+      # not hide this one.
+      - name: cargo clippy (miyoo)
+        if: always()
+        run: cargo clippy -p common -p alliumd -p allium-launcher -p allium-menu --all-targets --features common/miyoo,alliumd/miyoo,allium-launcher/miyoo,allium-menu/miyoo -- -D warnings 2>&1 | tee clippy-miyoo.log
+
+      # The findings, as a comment on the commit. The job log needs a login to read and the
+      # problem-matcher annotations stop at ten; a commit comment on a public repository needs
+      # neither, which is what lets them be acted on from a machine that cannot run clippy.
+      - name: Post findings as a commit comment
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### clippy findings for ${GITHUB_SHA::7}"
+            for log in clippy-host.log clippy-miyoo.log; do
+              [ -f "$log" ] || continue
+              echo
+              echo "<details><summary>$log</summary>"
+              echo
+              echo '```'
+              grep -E '^(error|warning)|^\s+-->|^\s+= note: .*\[' "$log" | head -300
+              echo '```'
+              echo '</details>'
+            done
+          } > comment.md
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -F body=@comment.md \
+            || echo "could not post the comment"
+
+  simulator:
+    name: Build Simulator
+    runs-on: ubuntu-latest
+    # Fails visibly when a change breaks the simulator, but does not gate the release: it is a
+    # development convenience, and a host-only dependency breaking should not hold a device build.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo build --features simulator
+        run: cargo build -p allium-launcher -p allium-menu --features common/simulator,allium-launcher/simulator,allium-menu/simulator
+
   build:
     name: Build Artifact
+    # Gates the release on fmt and tests: this job publishes, so it must not run for a tree
+    # those would reject. `deny` is left out deliberately -- a newly published advisory can
+    # fail it without anything in the tree having changed.
+    needs: [style, test, lint]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -71,6 +159,40 @@ jobs:
         with:
           key: armv7-unknown-linux-gnueabihf
 
+      # RetroArch is a Docker cross-build and by far the slowest step. Its make target lives
+      # under third-party/, so restoring the binary makes `make all` skip it entirely. dufs and
+      # collie are separate cargo workspaces that the rust-cache above does not cover.
+      # Allium's own RetroArch patches are part of the key too: a restored binary built without
+      # one would be silently wrong, and there is no other way to tell.
+      - name: Key third-party caches on submodule revisions and RetroArch patches
+        id: thirdparty
+        run: echo "key=$( (git submodule status; cat patches/retroarch/*.patch 2> /dev/null) | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache third-party builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            third-party/RetroArch-patch/bin
+            third-party/dufs/target
+            third-party/collie/target
+          # Exact key only. A prefix fallback would restore a RetroArch binary built from a
+          # different submodule revision or without one of Allium's patches, and the Makefile
+          # target has no prerequisites to notice -- so it would ship. dufs and collie rebuild
+          # from scratch when the key changes, which is rare.
+          key: thirdparty-${{ steps.thirdparty.outputs.key }}
+
+      # package-build stamps .allium/version.txt from `git describe --exact-match --tags`, so the
+      # tag has to exist before the build or the About screen shows a nightly hash. run_number
+      # keeps it monotonic; the base comes from the crate version, which `make bump-version` sets.
+      - name: Determine version
+        id: version
+        run: |
+          BASE=$(grep -m1 '^version' crates/allium-launcher/Cargo.toml | cut -d'"' -f2)
+          VERSION="v${BASE}-flip.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          git tag -f "$VERSION"
+          echo "Building $VERSION"
+
       - name: Build target
         run: cargo zigbuild --release --bins --target armv7-unknown-linux-gnueabihf
 
@@ -78,15 +200,30 @@ jobs:
         shell: bash
         run: |
           make all
+          echo "Version: $(cat dist/.allium/version.txt)"
           cd dist
           zip -r ../allium-armv7-unknown-linux-gnueabihf.zip .allium .tmp_update RetroArch Apps BIOS Roms Saves Themes
           cd -
+          ls -lh allium-armv7-unknown-linux-gnueabihf.zip
 
+      # Only for builds that don't publish; main's zip lives on the release instead
       - name: Upload artifact
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: allium-armv7-unknown-linux-gnueabihf
           path: allium-armv7-unknown-linux-gnueabihf.zip
+
+      - name: Publish release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: 'allium-armv7-unknown-linux-gnueabihf.zip'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   deny:
     runs-on: ubuntu-latest
