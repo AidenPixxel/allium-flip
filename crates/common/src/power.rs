@@ -68,7 +68,7 @@ impl PowerButtonAction {
 impl Default for PowerSettings {
     fn default() -> Self {
         Self {
-            lid_close_action: PowerButtonAction::Shutdown,
+            lid_close_action: PowerButtonAction::Suspend,
             power_button_action: PowerButtonAction::Suspend,
             auto_sleep_when_charging: true,
             auto_sleep_duration_minutes: 5,
@@ -136,6 +136,17 @@ mod tests {
         assert_eq!(parsed.auto_sleep_duration_minutes, 15);
         assert!(matches!(
             parsed.power_button_action,
+            PowerButtonAction::Suspend
+        ));
+    }
+
+    #[test]
+    fn a_fresh_install_sleeps_when_the_lid_shuts() {
+        // A clamshell that powers off whenever it is closed makes every lid close a reboot on the
+        // way back. Sleep is what a lid is for. Existing files carry their own value and are not
+        // touched by this.
+        assert!(matches!(
+            PowerSettings::default().lid_close_action,
             PowerButtonAction::Suspend
         ));
     }
