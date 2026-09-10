@@ -8,10 +8,8 @@ use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{
-    ALLIUM_DISPLAY_SETTINGS, MAX_BRIGHTNESS, PANEL_FLATTEN_THRESHOLD, WARMTH_BLUE_SCALE,
-    WARMTH_GREEN_SCALE,
+    ALLIUM_DISPLAY_SETTINGS, PANEL_FLATTEN_THRESHOLD, WARMTH_BLUE_SCALE, WARMTH_GREEN_SCALE,
 };
-use crate::display::backlight;
 
 /// How many profiles are kept. The rotate hotkey cycles all of them, so keep it small enough to
 /// get back to where you started without thinking about it.
@@ -21,15 +19,12 @@ pub const PROFILE_COUNT: usize = 3;
 pub const MAX_PROFILE_NAME_LEN: usize = 12;
 /// The platform raises anything lower, so never store a value the panel will not show.
 pub const MIN_CONTRAST: u8 = 10;
-/// The backlight a profile gets when it says nothing about one. Duty 49 against the boot script's
-/// period, which is the light the old default produced before the slider covered the whole panel.
+/// The backlight a profile gets when it says nothing about one -- the value the daemon has always
+/// started at, so a profile that says nothing changes nothing about how bright the device looks.
 pub const DEFAULT_BRIGHTNESS: u8 = 50;
-/// ...and what the shipped Night profile uses: as dim as the panel will go while still lighting.
-pub const NIGHT_BRIGHTNESS: u8 = 0;
-/// Bumped when a stored value changes meaning, so a document written by an older build can be
-/// brought forward. 1: brightness spans the panel's whole duty range rather than an eighth of it,
-/// so the same number is far more light than it was.
-const SETTINGS_VERSION: u32 = 1;
+/// ...and what the shipped Night profile uses. Low enough for a dark room, and above the floor
+/// `set_brightness` clamps to, so the panel comes out dim rather than dark.
+pub const NIGHT_BRIGHTNESS: u8 = 10;
 
 /// One full set of panel values, under a name the user chooses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,13 +131,6 @@ struct RawDisplayProfile {
     dimness: Option<u8>,
 }
 
-/// What a profile with no brightness of its own was given before the slider covered the whole
-/// panel. Deliberately still on that scale: `DisplaySettings::migrate` converts every stored
-/// brightness at once, and a value synthesised here has to go through it like any other.
-const LEGACY_DEFAULT_BRIGHTNESS: u8 = 85;
-/// ...and the same for one that had been dimmed.
-const LEGACY_NIGHT_BRIGHTNESS: u8 = 20;
-
 impl Default for RawDisplayProfile {
     fn default() -> Self {
         let neutral = DisplayProfile::neutral("");
@@ -165,8 +153,8 @@ impl Default for RawDisplayProfile {
 impl From<RawDisplayProfile> for DisplayProfile {
     fn from(raw: RawDisplayProfile) -> Self {
         let brightness = raw.brightness.unwrap_or(match raw.dimness {
-            Some(dimness) if dimness > 0 => LEGACY_NIGHT_BRIGHTNESS,
-            _ => LEGACY_DEFAULT_BRIGHTNESS,
+            Some(dimness) if dimness > 0 => NIGHT_BRIGHTNESS,
+            _ => DEFAULT_BRIGHTNESS,
         });
         Self {
             name: raw.name,
@@ -193,8 +181,6 @@ impl Default for DisplayProfile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "RawDisplaySettings")]
 pub struct DisplaySettings {
-    /// What build's meaning the stored values carry; see [`SETTINGS_VERSION`].
-    pub version: u32,
     pub active: usize,
     pub profiles: Vec<DisplayProfile>,
 }
@@ -208,7 +194,6 @@ pub struct DisplaySettings {
 #[derive(Default, Deserialize)]
 #[serde(default)]
 struct RawDisplaySettings {
-    version: Option<u32>,
     active: Option<usize>,
     profiles: Option<Vec<DisplayProfile>>,
 
@@ -225,14 +210,11 @@ struct RawDisplaySettings {
 impl From<RawDisplaySettings> for DisplaySettings {
     fn from(raw: RawDisplaySettings) -> Self {
         if let Some(profiles) = raw.profiles.filter(|p| !p.is_empty()) {
-            let mut settings = Self {
-                // Absent means it predates versioning, which is exactly what needs converting
-                version: raw.version.unwrap_or(0),
+            return Self {
                 active: raw.active.unwrap_or(0),
                 profiles,
-            };
-            settings.migrate();
-            return settings.sanitized();
+            }
+            .sanitized();
         }
 
         // A flat file predates profiles, so carry the values the user tuned into the first slot
@@ -257,22 +239,6 @@ impl DisplaySettings {
         Self::default()
     }
 
-    /// Brings a document written by an older build forward.
-    ///
-    /// Reads from the stored values rather than recording that it has run, so loading twice
-    /// without saving in between is harmless -- the second pass starts from the same file the
-    /// first did. Once anything saves, the version it writes stops this running again.
-    fn migrate(&mut self) {
-        if self.version < 1 {
-            // Brightness used to span duty 1..100, an eighth of the panel, so the same number is
-            // far more light now. Convert, so a device looks the same after the update as before.
-            for profile in &mut self.profiles {
-                profile.brightness = backlight::rescale_from_legacy(profile.brightness);
-            }
-        }
-        self.version = SETTINGS_VERSION;
-    }
-
     /// Clamps the document to the invariants everything downstream relies on, so no caller has to
     /// bounds-check: always `PROFILE_COUNT` profiles, `active` in range, names short enough to
     /// display, contrast above the platform's floor.
@@ -284,7 +250,6 @@ impl DisplaySettings {
         }
         for profile in &mut self.profiles {
             profile.contrast = profile.contrast.max(MIN_CONTRAST);
-            profile.brightness = profile.brightness.min(MAX_BRIGHTNESS);
             profile.name = truncate_name(&profile.name);
         }
         self.active = self.active.min(self.profiles.len() - 1);
@@ -392,7 +357,6 @@ fn truncate_name(name: &str) -> String {
 impl Default for DisplaySettings {
     fn default() -> Self {
         Self {
-            version: SETTINGS_VERSION,
             active: 0,
             profiles: (0..PROFILE_COUNT).map(Self::default_profile).collect(),
         }
@@ -414,10 +378,6 @@ mod tests {
         let day = &settings.profiles[0];
         assert_eq!(day.warmth, 0);
         assert_eq!(day.brightness, DEFAULT_BRIGHTNESS);
-        assert_eq!(
-            settings.version, SETTINGS_VERSION,
-            "fresh documents are current"
-        );
         assert_eq!(day.effective(), day.clone());
 
         let stored = &settings.profiles[1];
@@ -499,19 +459,13 @@ mod tests {
         let dimmed = r#"{"name":"Night","luminance":50,"hue":50,"saturation":50,
             "contrast":50,"r":50,"g":50,"b":50,"warmth":100,"dimness":100}"#;
         let parsed: DisplayProfile = serde_json::from_str(dimmed).unwrap();
-        assert_eq!(
-            parsed.brightness, LEGACY_NIGHT_BRIGHTNESS,
-            "still to be rescaled"
-        );
+        assert_eq!(parsed.brightness, NIGHT_BRIGHTNESS);
         assert_eq!(parsed.warmth, 100, "the rest of the profile is untouched");
         assert_eq!(parsed.luminance, 50, "no longer scaled down");
 
         let plain = r#"{"name":"Day","luminance":40,"dimness":0}"#;
         let parsed: DisplayProfile = serde_json::from_str(plain).unwrap();
-        assert_eq!(
-            parsed.brightness, LEGACY_DEFAULT_BRIGHTNESS,
-            "still to be rescaled"
-        );
+        assert_eq!(parsed.brightness, DEFAULT_BRIGHTNESS);
         assert_eq!(parsed.luminance, 40);
 
         // A profile written by this build round-trips its brightness rather than re-migrating
@@ -521,46 +475,8 @@ mod tests {
     }
 
     #[test]
-    fn an_unversioned_document_has_its_brightness_rescaled_once() {
-        // Written by the build whose slider covered an eighth of the panel. The same numbers mean
-        // far more light now, so they are converted -- the device has to look unchanged.
-        let legacy = r#"{"active":0,"profiles":[
-            {"name":"Day","brightness":85},
-            {"name":"Night","brightness":20,"warmth":100},
-            {"name":"Custom","brightness":100}]}"#;
-        let parsed: DisplaySettings = serde_json::from_str(legacy).unwrap();
-        assert_eq!(parsed.version, SETTINGS_VERSION);
-        assert_eq!(parsed.profiles[0].brightness, 50, "the old default's light");
-        assert_eq!(parsed.profiles[1].brightness, 0, "the old floor's light");
-        assert_eq!(parsed.profiles[2].brightness, 63, "the old maximum's light");
-
-        // Loading again without saving must not convert twice
-        let again: DisplaySettings = serde_json::from_str(legacy).unwrap();
-        assert_eq!(again.profiles[0].brightness, 50);
-
-        // ...and a document already at this version is left alone
-        let current = format!(
-            r#"{{"version":{SETTINGS_VERSION},"active":0,"profiles":[{{"name":"Day","brightness":85}}]}}"#
-        );
-        let parsed: DisplaySettings = serde_json::from_str(&current).unwrap();
-        assert_eq!(parsed.profiles[0].brightness, 85, "already current");
-    }
-
-    #[test]
-    fn a_dimness_era_document_lands_on_the_new_scale() {
-        // Two migrations in sequence: dimness becomes a brightness, which is then rescaled.
-        let legacy = r#"{"active":0,"profiles":[
-            {"name":"Day","dimness":0},
-            {"name":"Night","dimness":100,"warmth":100}]}"#;
-        let parsed: DisplaySettings = serde_json::from_str(legacy).unwrap();
-        assert_eq!(parsed.profiles[0].brightness, DEFAULT_BRIGHTNESS);
-        assert_eq!(parsed.profiles[1].brightness, NIGHT_BRIGHTNESS);
-    }
-
-    #[test]
     fn sanitized_enforces_the_invariants() {
         let settings = DisplaySettings {
-            version: SETTINGS_VERSION,
             active: 99,
             profiles: vec![DisplayProfile {
                 name: "a very long profile name".to_owned(),
@@ -583,7 +499,6 @@ mod tests {
 
         // More profiles than slots are dropped, not kept
         let many = DisplaySettings {
-            version: SETTINGS_VERSION,
             active: 0,
             profiles: vec![DisplayProfile::default(); PROFILE_COUNT + 2],
         }

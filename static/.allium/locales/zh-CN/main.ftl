@@ -10,7 +10,6 @@ sort-most-played = 排序：最久玩
 sort-rating = 排序：评分
 sort-release-date = 排序：发布日期
 sort-random = 排序：随机
-sort-search = 搜索
 sort-favorites = 排序:收藏
 
 no-recent-games = 玩游戏开始
@@ -23,7 +22,7 @@ populating-games = 填充游戏... ({ $directory })
 menu-set-as-favorite = 设为收藏
 menu-unset-as-favorite = 取消收藏
 menu-launch = 启动
-menu-launch-with-core = 启动（使用< { $core } >）
+menu-launch-with-core = 启动（使用{ $core }）
 menu-reset = 重置
 menu-remove-from-recents = 从最近中移除
 menu-repopulate-database = 重新填充数据库
@@ -132,6 +131,18 @@ ingame-menu-disk = 磁盘{ $disk }
 guide-button-search = 搜索
 guide-button-next = 下一项
 guide-button-prev = 上一项
+
+# Hotkeys
+hotkeys-global = 全局热键：
+hotkeys-screenshot = 屏幕截图
+hotkeys-volume-down = 减小音量
+hotkeys-volume-up = 增大音量
+hotkeys-brightness-down = 降低亮度
+hotkeys-brightness-up = 增加亮度
+
+hotkeys-ingame = 游戏内热键：
+hotkeys-toggle-aspect-ratio = 更改纵横比
+hotkeys-toggle-fps = 切换FPS显示
 
 # Common
 button-back = 返回

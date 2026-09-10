@@ -10,7 +10,6 @@ sort-most-played = Tri: Temps
 sort-rating = Tri: Note
 sort-release-date = Tri: Date de sortie
 sort-random = Tri: Aléatoire
-sort-search = Recherche
 sort-favorites = Tri: Favoris
 
 no-recent-games = Lancez un jeu pour commencer
@@ -23,7 +22,7 @@ populating-games = Génération des jeux... ({ $directory })
 menu-set-as-favorite = Ajouter aux favoris
 menu-unset-as-favorite = Retirer des favoris
 menu-launch = Lancer
-menu-launch-with-core = Lancer avec < { $core } >
+menu-launch-with-core = Lancer avec { $core }
 menu-reset = Réinitialiser
 menu-remove-from-recents = Supprimer des récents
 menu-repopulate-database = Regénération de la BDD
@@ -133,6 +132,18 @@ ingame-menu-disk = Disque { $disk }
 guide-button-search = Rechercher
 guide-button-next = Suivant
 guide-button-prev = Précédent
+
+# Hotkeys
+hotkeys-global = Raccourcis globaux:
+hotkeys-screenshot = Capture d'écran
+hotkeys-volume-down = Volume -
+hotkeys-volume-up = Volume +
+hotkeys-brightness-down = Luminosité -
+hotkeys-brightness-up = Luminosité +
+
+hotkeys-ingame = Raccourcis en jeu:
+hotkeys-toggle-aspect-ratio = Changer l'aspect
+hotkeys-toggle-fps = Afficher les FPS
 
 # Common
 button-back = Retour

@@ -60,7 +60,7 @@ pub trait Platform {
 
     fn set_brightness(&mut self, brightness: u8) -> Result<()>;
 
-    fn set_display_settings(&mut self, profile: &mut DisplayProfile) -> Result<()>;
+    fn set_display_settings(&mut self, settings: &mut DisplayProfile) -> Result<()>;
 
     fn device_model() -> String;
 

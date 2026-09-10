@@ -653,12 +653,6 @@ where
     }
 }
 
-/// A row in the in-game menu.
-///
-/// Append, never insert: `handle_key_event` compares row indices against
-/// `MenuEntry::Continue as usize` and friends, which only works while Continue, Save and Load hold
-/// discriminants 0, 1 and 2 -- a variant added above them would silently repoint the disk and
-/// save-state slot rows.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MenuEntry {
     Continue,

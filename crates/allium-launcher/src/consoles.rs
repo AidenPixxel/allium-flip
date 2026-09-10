@@ -211,7 +211,7 @@ impl ConsoleMapper {
             error!("Core \"{}\" does not exist.", core_name);
             return Ok(None);
         };
-        let mut game_info = match &core.core {
+        let game_info = match &core.core {
             CoreType::RetroArch(libretro_core) => GameInfo::new(
                 game.name.clone(),
                 game.path.clone(),
@@ -244,7 +244,6 @@ impl ConsoleMapper {
         };
         debug!("Saving game info: {:?}", game_info);
         game_info.save()?;
-
         Ok(Some(Command::Exec(game_info.command())))
     }
 

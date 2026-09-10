@@ -10,18 +10,9 @@ sort-most-played = Sort: Playtime
 sort-rating = Sort: Rating
 sort-release-date = Sort: Release Date
 sort-random = Sort: Random
-sort-search = Search
 sort-favorites = Sort: Favorites
-sort-relevance = Sort: Relevance
 
 no-recent-games = Play a game to get started
-search-games-found = 
-    { $count -> 
-        [zero] No games found
-        [one] 1 game found
-       *[other] { $count } games found
-    }
-
 populating-database = Populating database...
     This may take several minutes.
     Go grab a coffee!
@@ -30,7 +21,7 @@ populating-games = Populating games... ({ $directory })
 menu-set-as-favorite = Set as Favorite
 menu-unset-as-favorite = Remove from Favorites
 menu-launch = Launch
-menu-launch-with-core = Launch with < { $core } >
+menu-launch-with-core = Launch with { $core }
 menu-reset = Reset
 menu-remove-from-recents = Remove from Recents
 menu-repopulate-database = Repopulate Database
@@ -197,12 +188,13 @@ ingame-menu-continue = Continue
 ingame-menu-save = Save
 ingame-menu-load = Load
 ingame-menu-reset = Reset
-ingame-menu-settings = Emulator
+ingame-menu-settings = Settings
 ingame-menu-guide = Guide
 ingame-menu-quit = Quit
 ingame-menu-slot = Slot { $slot }
 ingame-menu-slot-auto = Auto
 ingame-menu-disk = Disk { $disk }
+
 # The in-game indicator, drawn by RetroArch in its bitmap font: ASCII only, one line.
 osd-volume = Volume
 osd-brightness = Brightness
@@ -212,17 +204,28 @@ guide-button-search = Search
 guide-button-next = Next
 guide-button-prev = Prev
 
+# Hotkeys
+hotkeys-global = Global Hotkeys:
+hotkeys-screenshot = Screenshot
+hotkeys-volume-down = Volume -
+hotkeys-volume-up = Volume +
+hotkeys-brightness-down = Brightness -
+hotkeys-brightness-up = Brightness +
+
+hotkeys-ingame = Ingame Hotkeys:
+hotkeys-toggle-aspect-ratio = Toggle Aspect Ratio
+hotkeys-toggle-fps = Toggle FPS
+
 # Common
 button-back = Back
 button-confirm = Confirm
 button-edit = Edit
 button-select = Select
-button-launch = Launch
 button-resume = Resume
 button-restart = Restart
 button-options = Options
+button-launch = Launch
 button-sort = Sort
-button-edit-search = Edit Search
 button-restore-defaults = Restore Defaults
 
 keyboard-button-backspace = Backspace

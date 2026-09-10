@@ -86,8 +86,7 @@ pub const SAVE_STATE_IMAGE_WIDTH: u32 = 333;
 
 /// Volume scale is 0..=MAX_VOLUME, mapped to the hardware dB curve at the platform layer.
 pub const MAX_VOLUME: i32 = 20;
-/// Brightness scale is 0..=MAX_BRIGHTNESS percent. Zero is the dimmest the panel still lights,
-/// not off; `screen::set_backlight` is what switches it off.
+/// Brightness scale is 0..=MAX_BRIGHTNESS percent.
 pub const MAX_BRIGHTNESS: u8 = 100;
 
 /// The warmth slider cuts green and blue and leaves red alone, so the panel goes amber for playing
@@ -103,7 +102,6 @@ pub const WARMTH_BLUE_SCALE: f32 = 0.10;
 /// itself this low, so `DisplayProfile::effective` lifts the whole set to clear it rather than
 /// clamping each channel -- clamping would cap how warm an ordinary profile can go.
 pub const PANEL_FLATTEN_THRESHOLD: u8 = 15;
-
 /// How long the daemon waits for a keypress before powering back off after a charger-triggered
 /// boot, so pressing Power while the cable is attached still turns the device on.
 pub const CHARGE_POWER_OFF_GRACE: Duration = Duration::from_millis(1500);

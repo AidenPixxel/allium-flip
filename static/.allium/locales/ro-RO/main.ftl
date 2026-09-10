@@ -10,7 +10,6 @@ sort-most-played = Ordine: Activitate
 sort-rating = Ordine: Evaluare
 sort-release-date = Ordine: Dată de lansare
 sort-random = Ordine: Aleatoriu
-sort-search = Caută
 sort-favorites = Ordine: Favorite
 
 no-recent-games = Joacă un joc pentru a începe
@@ -23,7 +22,7 @@ populating-games = Se populează jocurile... ({ $directory })
 menu-set-as-favorite = Adaugă la Favorite
 menu-unset-as-favorite = Elimină din Favorite
 menu-launch = Pornește
-menu-launch-with-core = Pornește cu < { $core } >
+menu-launch-with-core = Pornește cu { $core }
 menu-reset = Resetează
 menu-remove-from-recents = Elimină din Recente
 menu-repopulate-database = Repopulează Baza de date
@@ -133,6 +132,18 @@ ingame-menu-disk = Disc { $disk }
 guide-button-search = Căutare
 guide-button-next = Următorul
 guide-button-prev = Anterior
+
+# Hotkeys
+hotkeys-global = Hotkey-uri Globale:
+hotkeys-screenshot = Captură de ecran
+hotkeys-volume-down = Volum -
+hotkeys-volume-up = Volum +
+hotkeys-brightness-down = Luminozitate -
+hotkeys-brightness-up = Luminozitate +
+
+hotkeys-ingame = Hotkey-uri în Joc:
+hotkeys-toggle-aspect-ratio = Comută Raportul de Aspect
+hotkeys-toggle-fps = Comută FPS
 
 # Common
 button-back = Înapoi

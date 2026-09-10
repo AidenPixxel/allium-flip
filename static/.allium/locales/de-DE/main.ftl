@@ -10,7 +10,6 @@ sort-most-played = Sortierung: Spielzeit
 sort-rating = Sortierung: Bewertung
 sort-release-date = Sortierung: Erscheinungsdatum
 sort-random = Sortierung: Zufall
-sort-search = Suche
 sort-favorites = Sortierung: Favoriten
 
 no-recent-games = Spiele ein Spiel, um zu beginnen
@@ -23,7 +22,7 @@ populating-games = Spiele werden aktualisiert... ({ $directory })
 menu-set-as-favorite = Als Favorit markieren
 menu-unset-as-favorite = Aus Favoriten entfernen
 menu-launch = Starten
-menu-launch-with-core = Starten mit < { $core } >
+menu-launch-with-core = Starten mit { $core }
 menu-reset = Reset
 menu-remove-from-recents = Aus Verlauf entfernen
 menu-repopulate-database = Datenbank neu füllen
@@ -133,6 +132,18 @@ ingame-menu-disk = Slot { $disk }
 guide-button-search = Suchen
 guide-button-next = Weiter
 guide-button-prev = Zurück
+
+# Hotkeys
+hotkeys-global = Globale Tastenkürzel:
+hotkeys-screenshot = Bildschirmfoto
+hotkeys-volume-down = Lautstärke -
+hotkeys-volume-up = Lautstärke +
+hotkeys-brightness-down = Helligkeit -
+hotkeys-brightness-up = Helligkeit +
+
+hotkeys-ingame = Tastenkürzel im Spiel:
+hotkeys-toggle-aspect-ratio = Seitenverhältnis umschalten
+hotkeys-toggle-fps = FPS umschalten
 
 # Common
 button-back = Zurück

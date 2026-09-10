@@ -166,7 +166,7 @@ jobs:
       # one would be silently wrong, and there is no other way to tell.
       - name: Key third-party caches on submodule revisions and RetroArch patches
         id: thirdparty
-        run: echo "key=$( (git submodule status; cat patches/retroarch/*.patch) | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        run: echo "key=$( (git submodule status; cat patches/retroarch/*.patch 2> /dev/null) | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Cache third-party builds
         uses: actions/cache@v4

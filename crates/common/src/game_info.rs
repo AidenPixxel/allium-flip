@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
-use log::{debug, warn};
+use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{ALLIUM_GAME_INFO, ALLIUM_GAMES_DIR, ALLIUM_SCRIPTS_DIR};
@@ -29,8 +29,6 @@ pub struct GameInfo {
     pub has_menu: bool,
     /// Whether swap should be enabled.
     pub needs_swap: bool,
-    /// The CPU governor preset to run this game at, already resolved against the global default.
-    ///
     /// Path to the image.
     pub image: Option<PathBuf>,
     /// Paths to the guide text files.
@@ -142,10 +140,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn state_files_from_other_builds_still_parse() {
+    fn older_state_files_still_parse() {
         // A parse failure loses the game in progress on the first boot after an update (and used
-        // to delete the state file too), so both directions have to keep deserializing: a file
-        // from before a field existed, and one carrying a field that has since been removed.
+        // to delete the state file too), so a file written by another build has to keep
+        // deserializing -- including one carrying keys this build knows nothing about.
         let legacy = r#"{
             "name": "Game One",
             "path": "Roms/GBA/Game One.gba",
@@ -162,13 +160,13 @@ mod tests {
         let game_info: GameInfo = serde_json::from_str(legacy).unwrap();
         assert_eq!(game_info.name, "Game One");
 
-        // Written while per-game CPU speed existed. The key is now unknown and must be ignored
-        // rather than rejected -- serde does that by default, and nothing here opts out of it.
-        let with_performance_mode = legacy.replace(
+        // Written by a build that had a per-game CPU speed setting. Nothing here opts out of
+        // serde's default, so the unknown key is ignored rather than failing the parse.
+        let with_unknown_key = legacy.replace(
             r#""needs_swap": false,"#,
             r#""needs_swap": false, "performance_mode": "Max","#,
         );
-        let game_info: GameInfo = serde_json::from_str(&with_performance_mode).unwrap();
+        let game_info: GameInfo = serde_json::from_str(&with_unknown_key).unwrap();
         assert_eq!(game_info.name, "Game One");
     }
 }

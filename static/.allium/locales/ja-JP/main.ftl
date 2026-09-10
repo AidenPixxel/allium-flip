@@ -10,7 +10,6 @@ sort-most-played = ソート：プレイ時間
 sort-rating = ソート：評価
 sort-release-date = ソート：リリース日
 sort-random = ソート：ランダム
-sort-search = 検索
 sort-favorites = ソート:お気に入り
 
 no-recent-games = ゲームをプレイして開始
@@ -23,7 +22,7 @@ populating-games = ゲームへの入力... ({ $directory })
 menu-set-as-favorite = お気に入りに追加
 menu-unset-as-favorite = お気に入りから削除
 menu-launch = 起動
-menu-launch-with-core = < { $core } >で起動
+menu-launch-with-core = { $core }で起動
 menu-reset = リセット
 menu-remove-from-recents = 最近から削除
 menu-repopulate-database = データベースを再入力
@@ -132,6 +131,18 @@ ingame-menu-disk = ディスク{ $disk }
 guide-button-search = 捜索
 guide-button-next = 次へ
 guide-button-prev = 前へ
+
+# Hotkeys
+hotkeys-global = グローバル・ホットキー：
+hotkeys-screenshot = スクリーンショット
+hotkeys-volume-down = 音量を下げる
+hotkeys-volume-up = 音量を上げる
+hotkeys-brightness-down = 輝度を下げる
+hotkeys-brightness-up = 輝度を上げる
+
+hotkeys-ingame = ゲーム内のホットキー
+hotkeys-toggle-aspect-ratio = アスペクト比
+hotkeys-toggle-fps = FPS表示
 
 # Common
 button-back = 戻る

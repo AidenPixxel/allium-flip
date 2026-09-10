@@ -3,131 +3,67 @@
 Every push to `main` that builds is a release, tagged `v<version>-flip.<run>`. This file groups those
 by what changed rather than by run number; the commit log has the detail.
 
-## Unreleased
+## Unreleased — rebuilt on upstream
 
-### Removed
-- **Per-game CPU speed and the Settings → Power performance mode.** The tiers were sold on battery
-  life, and that does not hold up: for a fixed amount of work, dynamic CPU energy goes as voltage
-  squared and is *independent of frequency*, so capping the clock on a frame-limited emulator moves
-  time from idle to busy inside each frame and lands on roughly the same total. Real savings need
-  per-frequency voltage scaling, and nothing about this SoC says it does that. Meanwhile **High**,
-  described as "speeds up to full when a game needs it", was untuned `ondemand` — which lags a
-  sampling period behind a heavy scene, and on a kernel that boots with `performance` was slower
-  than leaving the CPU alone.
+This fork was rebuilt from [upstream](https://github.com/goweiwen/Allium) `main` rather than carried
+forward from its own history. Every feature below was chosen deliberately and re-applied; anything
+not listed is upstream's own behaviour, unchanged.
 
-  The CPU is now left exactly as the kernel boots it, which is what `System` — the default, and so
-  almost every device — already did. **If you had picked a mode, games may run faster after this
-  update.** Nothing resets: an old `power.json` or save-state file carrying the setting still loads,
-  the key is simply ignored.
+What that gains: three upstream commits the fork had never taken — row-wise framebuffer reads and
+writes, the OTA client's TLS fix, and version 1.0.2 — and the shedding of two features that had been
+built and then removed again inside the fork, along with the residue they left behind.
 
-  Video playback still pins the governor while it needs it, but now puts it back itself on every
-  exit path, including being quit mid-video — previously that cleanup lived in the daemon.
+### Kept from the old fork
 
-### Fixed
-- The in-game volume and brightness indicator no longer flickers over RetroArch. It is now handed to
-  RetroArch as a `SHOW_MSG`, which RetroArch draws inside the frame it presents; stamping the same
-  pixels into the framebuffer from outside always raced the game's next frame, which flips without
-  vsync. Needs the bundled RetroArch patch that makes `SHOW_MSG` replace the previous message rather
-  than queue behind it.
+- **Display profiles.** Three named presets, each with a full set of panel values plus its own warmth
+  and backlight brightness, rotated with Menu + Select. Applied in the display controller, so they
+  cover games. Night dims the lamp; Day restores it.
+- **A flicker-free in-game indicator**, handed to RetroArch as its own on-screen message while a game
+  is running. Needs the bundled RetroArch patch that makes `SHOW_MSG` replace the previous message
+  rather than queue behind it. Everywhere else keeps the drawn plate.
+- **Suspend shutdown delay** and **charger-wake behaviour** (charge screen, charge silently, or stay
+  off — decided before the backlight comes on), with a description on every Power row.
+- **Wi-Fi that reports why it failed**, and that comes up with one supplicant on a network with no
+  route to the internet.
+- **Updates over Wi-Fi**: on-device System Update against this fork's releases, builds pushed from a
+  computer, and an install that is staged, atomic, resumable, and preserves hand-edited
+  `consoles.toml` / `cores.toml`.
+- **X restarts a game from the beginning**; A resumes, Y sorts, Select opens options.
+- Hardening: settings files kept as `.bak` rather than deleted when they fail to parse and written
+  atomically; the daemon logging and retrying instead of exiting, since the boot script answers a
+  dead daemon by rebooting; stale autorepeats dropped without dropping real presses; the in-game menu
+  no longer acting on a play session's queued input; `myctl display blank` no longer aborting; ffplay
+  putting the CPU governor back when it is done with it.
+- CI: clippy over both feature sets and the simulator build gate the device build, and a release is
+  published from the artefact that was tested rather than a rebuild of it.
 
-### Changed
-- **Night mode now dims the backlight.** A display profile carries its own **Brightness**, applied
-  when the profile becomes active — so Menu+Select into Night drops the lamp and back into Day
-  restores it. This replaces **Dimness**, which scaled the video signal while the backlight burned
-  just as hard: it lowered peak white but not the black level, costing contrast and saving no light.
-  Menu+Up/Down still nudges the live backlight; the next profile switch takes it back to that
-  profile's value.
-- **Warmth reaches a real amber.** At 100 it now leaves roughly 1800–2000K instead of 2500K. The old
-  per-channel floor that capped it was guarding against the panel's grey-flattening, which needs
-  *all three* channels below 15 and so could only ever happen to a profile whose own red was that
-  low; that case now lifts the whole set proportionally and keeps the tint.
-- **The brightness slider covers the whole backlight, and every step changes something.** Allium had
-  only ever driven duty cycles 1-100 of a PWM whose period is 800 -- an eighth of what the panel can
-  do -- which left so few integers at the dim end that 20% and 25% were the same setting. The slider
-  now spans the panel's real range: 0% is the dimmest it will light, 100% is full output, brighter
-  than the device has previously gone, and each press is the same multiple of the last. Stored
-  profiles are converted on first load, so nothing looks different until you move a slider.
-- The shipped **Night** profile is set up for a dark room: the dimmest lit backlight, warmth 100,
-  saturation 35, contrast 40, luminance untouched.
+### Deliberately not carried over
 
-**On upgrade:** brightness is converted for you, so the screen looks the same after the update as
-before it — there is simply more range above where you were. Warmth 100 is noticeably warmer than it
-used to be. Profiles that had Dimness above zero become dim-backlight profiles; the rest keep the
-light they had.
+- **Per-game CPU speed / performance modes.** Built and then removed inside the old fork: capping the
+  clock on a frame-limited emulator saves no measurable battery without per-frequency voltage
+  scaling, and its "High" preset was untuned `ondemand`, slower than leaving the CPU alone on a
+  kernel that boots with `performance`.
+- **The in-game Controls and Options screens.** Also built and then removed: they wrote RetroArch
+  override files, which collide with RetroArch's own settings and cannot apply without a relaunch.
+- **The brightness curve.** The slider keeps the platform's plain mapping rather than a logarithmic
+  one over the panel's full PWM range, so every step is a distinct duty cycle.
+- **Discoverable per-game core selection** and the **Restart config carry-back** — see the caveat
+  below.
 
-- The indicator alliumd draws itself — in the launcher, the in-game menu and Allium's own apps — now
-  looks exactly like RetroArch's in-game message: one line of white 2× bitmap text with a black drop
-  shadow at the bottom left, no plate or icons, shown for three seconds. Same key press, same look,
-  wherever you are. The font is Spleen 6×12 (BSD 2-Clause; licence shipped in
-  `.allium/fonts/licenses/`), converted into the binary by `scripts/fonts/bdf_to_rust.py`.
-- Games started with **Restart** kept RetroArch's config on tmpfs, so every setting saved from
-  RetroArch's menu during such a run -- hotkeys included -- was discarded on exit. The launcher now
-  carries the saved config back with auto-load restored.
+### Removed from upstream
 
-## v1.0.1-flip.38 -- 2026-09-08
+- **Game search.** The results screen, the keyboard-backed search view, the commands behind them, the
+  SQL query, and the sort-by-relevance option are gone, which is what frees X for Restart. The guide
+  reader keeps its own in-text search.
+- **61 emulator cores and the PICO-8 wrapper**, about 300 MB. `consoles.toml` and `cores.toml` are
+  untouched, so restoring a core is a matter of dropping its `.so` and `.info` back in — and 52 of
+  the 85 listed consoles have no shipped core as a result.
+- The DraStic download from the build, the scheduled nightly workflow, and the separate release
+  workflow that `ci.yml` now supersedes.
 
-### Fixed
-- Settings files (`power.json`, `wifi.json`, `locale.json`, `current_game`, `update.json`) are kept
-  as `.bak` instead of deleted when they fail to parse, and written atomically so a power cut cannot
-  leave a truncated one behind.
-- The daemon no longer reboots the device when the launcher crashes on startup (three exits in ten
-  seconds now pause five), when it cannot spawn the launcher (it retries), when the battery reading
-  fails at boot, or when a key event's handler errors.
-- Wi-Fi: `wifi-on.sh` leaves exactly one `wpa_supplicant` and one `udhcpc` however often it runs,
-  and only power-cycles the radio when the interface will not come up without it. Open networks
-  (`key_mgmt=NONE`) and hidden networks (`scan_ssid=1`) are configured correctly; an empty password
-  no longer invalidates the whole `wpa_supplicant.conf`.
-- LAN services (file server, FTP, SSH, telnet, syncthing) wait for `wlan0` to have an address rather
-  than for `1.1.1.1` to answer, so they start on networks with no route to the internet.
-- `dufs-on.sh` no longer uses `&>`, which busybox `sh` misparses.
-- Repopulate Database keeps rows that carry a per-game performance mode.
-- The in-game OSD probes whether `FBIO_WAITFORVSYNC` really blocks before trusting it, and sweeps
-  blits up to the moment the panel scans the plate rather than blitting once at vblank.
-- On-device update: the install is staged and each file moved into place atomically; the archive is
-  removed only once everything has moved, so an interrupted install resumes on the next boot.
-  Hand-edited `consoles.toml` and `cores.toml` are preserved via a `.dist` copy of what shipped.
+### Known caveat
 
-### Changed
-- The in-game **Controls** and **Options** screens are removed. They wrote RetroArch override files,
-  which collided with RetroArch's own settings, could not apply without a relaunch, and could not be
-  presented legibly in a menu with no frame timer. Per-game Performance returns as its own **Speed**
-  row, applied instantly.
-- The Wi-Fi status row reports progress (Searching / Connecting / Getting IP address) and, after
-  thirty seconds, the likely cause: network not found, wrong password, or no IP address.
-- Update channel is On/Off (was Off/Stable/Nightly) and defaults to On. "Update available" means
-  numerically newer, not merely different.
-
-### Added
-- **System Update** on the device works: TLS via `rustls` with bundled roots (upstream `392f7f2`),
-  pointed at this fork's releases.
-- CI runs clippy in both the host and `miyoo` configurations and gates the build on it; it also
-  builds the simulator.
-- `.gitattributes` pins LF for every file the handheld reads.
-- This changelog, and a README describing the fork rather than upstream.
-
-## 2026-09-08
-
-- Push a build to the handheld over Wi-Fi with `scripts/push-update.sh` / `make push`; the archive
-  is verified before upload and again on the device before extraction; a bad archive is quarantined
-  as `.bad` instead of retried every boot. UPDATING.md documents the routes.
-- Power-screen descriptions scroll instead of running off screen.
-- Controls and Options in-game screens with per-game / per-console / per-core scoping, and Apply
-  Now (all removed again — see Unreleased).
-
-## 2026-09-07
-
-- Per-game CPU governor presets, later reworked to six frequency-capped tiers (Powersave, Low,
-  Medium, High, Max, System) with a global default under Settings → Power.
-- Named display profiles, replacing night mode.
-- Suspend shutdown delay is a setting.
-- Charger-wake keeps the panel dark.
-- `myctl` no longer aborts on a mismatched clap argument id.
-- OSD driven from the panel's vblank rather than the app's page flips.
-
-## 2026-09-06 — fork created
-
-- Baseline trimmed from upstream Allium at about `b254538`, Flip-only core set.
-- Night mode; charger boot behaviour (charge screen, charge silently, stay off); discoverable
-  per-game core selection; in-game menu drops stale input before reading; OSD bar flicker fix.
-- CI: releases published from the build that already succeeded; `Off` update channel as default
-  (the payload pointed at upstream at the time).
+A game launched with **X** discards anything saved in RetroArch's own menu during that session,
+hotkeys included, because Restart runs RetroArch against a temporary config and does not copy it
+back. The fix for this existed in the old fork and was not selected. Launch with **A** when those
+changes need to persist.

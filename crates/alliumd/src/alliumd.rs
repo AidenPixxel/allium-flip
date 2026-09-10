@@ -30,7 +30,7 @@ use common::database::Database;
 use common::game_info::GameInfo;
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
 
-use crate::osd::Osd;
+use crate::osd::{Osd, OsdContent, OsdKind};
 
 #[cfg(unix)]
 use {
@@ -85,23 +85,6 @@ impl MenuHandle {
             _handle: handle,
         }
     }
-}
-
-/// Which control the indicator reports
-#[derive(Debug, Clone, Copy)]
-enum OsdKind {
-    Volume,
-    Brightness,
-    DisplayProfile,
-}
-
-/// What the indicator's line says after its label
-#[derive(Debug)]
-enum OsdContent {
-    /// A level, shown as a bar and a percentage
-    Bar(f32),
-    /// A name
-    Label(String),
 }
 
 pub struct AlliumD<P: Platform> {
@@ -273,11 +256,10 @@ impl AlliumD<DefaultPlatform> {
         platform.set_volume(state.volume)?;
 
         info!("loading display settings");
-        // The active profile owns the backlight, so it -- not the stored slider position -- is
-        // what the device comes up at. `effective` folds in its warmth without baking it into
-        // the stored values, so the profile survives a reboot.
-        let display_settings = DisplaySettings::load()?;
-        let profile = display_settings.active().clone();
+        // The active profile owns the backlight as well as the panel values, so it -- not the
+        // stored slider position -- is what the device comes up at. `effective` folds the
+        // profile's warmth in without baking it into the stored values, so it survives a reboot.
+        let profile = DisplaySettings::load()?.active().clone();
         state.brightness = profile.brightness;
 
         info!("setting brightness: {}", state.brightness);
@@ -287,16 +269,11 @@ impl AlliumD<DefaultPlatform> {
         let main = respawn_main().await;
         let locale = Locale::new(&LocaleSettings::load()?.lang);
 
+        // One load per process: font data is Arc'd, so clones share it
         let styles = Stylesheet::load()?;
 
-        // The launcher and the in-game menu both keep this much of the bottom of the screen for
-        // their button hints, so the indicator sits above it rather than on top of them. Taken
-        // from the theme, matching ButtonHints::ensure_layout, so a bigger font still clears.
-        let osd_inset = styles.button_size().max(styles.button_hint_font_size()) as u32
-            + styles.ui.margin_x.max(0) as u32;
-
         // Spawn the persistent menu thread at startup
-        let menu = MenuHandle::new(styles);
+        let menu = MenuHandle::new(styles.clone());
 
         platform.daemon();
 
@@ -311,7 +288,7 @@ impl AlliumD<DefaultPlatform> {
             state,
             locale,
             power_settings,
-            osd: Osd::new(osd_inset),
+            osd: Osd::new(styles),
             child_exits: VecDeque::new(),
         })
     }
@@ -403,10 +380,7 @@ impl AlliumD<DefaultPlatform> {
                             error!("failed to update OSD: {}", e);
                         }
                     }
-                    // `Some` matters: once the menu thread is gone the channel closes and recv
-                    // returns None forever, so a `_` pattern would spin the loop at full speed,
-                    // flooding RetroArch with Unpause and starving the event loop
-                    Some(()) = self.menu.done_rx.recv() => {
+                    _ = self.menu.done_rx.recv() => {
                         info!("menu finished, resuming game");
                         self.menu_open = false;
                         self.is_menu_pressed_alone = false;
@@ -590,7 +564,6 @@ impl AlliumD<DefaultPlatform> {
                         self.hide_osd();
 
                         if self.menu.tx.send(info).is_err() {
-                            // Latching menu_open here would block every future menu press
                             error!("failed to send to menu thread");
                             RetroArchCommand::Unpause.send_or_log().await;
                         } else {
@@ -906,8 +879,7 @@ impl AlliumD<DefaultPlatform> {
         Ok(())
     }
 
-    /// Rotate to the next display profile. Driven through the display controller's colour
-    /// registers rather than the framebuffer, so it applies to RetroArch's frames too.
+    /// Advances to the next display profile and puts it into effect.
     fn rotate_display_profile(&mut self) -> Result<()> {
         let mut settings = DisplaySettings::load()?;
         let active = settings.rotate();
@@ -933,7 +905,6 @@ impl AlliumD<DefaultPlatform> {
         self.show_osd_content(kind, OsdContent::Bar(fraction));
     }
 
-    /// Shows text instead of a bar, for something that has a name rather than a level.
     fn show_osd_label(&mut self, kind: OsdKind, label: String) {
         self.show_osd_content(kind, OsdContent::Label(label));
     }
@@ -978,19 +949,18 @@ impl AlliumD<DefaultPlatform> {
         // stamped into its framebuffer from here always can: the driver flips without vsync and
         // overwrites the page being scanned at an arbitrary phase, which no repaint timing wins
         // reliably. Three attempts at that timing preceded this.
-        let text = self.osd_text(kind, &content);
         if self.retroarch_in_foreground() {
             self.hide_osd();
+            let text = self.osd_text(kind, &content);
             tokio::spawn(async move {
                 RetroArchCommand::ShowMsg(text).send_or_log().await;
             });
             return;
         }
 
-        // Everywhere else the same line is drawn by hand, to look identical
         let repainting = self.foreground_repaints() && !self.menu_open;
         // Cosmetic only: a failed overlay must not take down the daemon
-        if let Err(e) = self.osd.show(&mut self.platform, &text, repainting) {
+        if let Err(e) = self.osd.show(&mut self.platform, kind, content, repainting) {
             error!("failed to show OSD: {}", e);
         }
     }

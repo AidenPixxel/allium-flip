@@ -1,6 +1,6 @@
 [package]
 name = "alliumd"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 license = "MIT"
 
@@ -22,7 +22,6 @@ nix = { workspace = true, features = ["signal", "process"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 simple_logger = { workspace = true, default-features = false }
-tiny-skia.workspace = true
 tokio = { workspace = true, features = ["full"] }
 
 [dependencies.common]

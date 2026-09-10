@@ -28,9 +28,6 @@ pub struct EntryListState<S> {
 #[derive(Debug)]
 pub struct CoreSelection {
     core: usize,
-    /// The core that was already in effect when the menu was opened, so we only
-    /// write a per-game override when the user actually picked something else.
-    original: usize,
     cores: Vec<String>,
 }
 
@@ -63,7 +60,7 @@ where
 
         let mut button_hints = {
             let locale = res.get::<Locale>();
-            let hints = vec![
+            let mut hints = vec![
                 ButtonHint::new(
                     res.clone(),
                     Point::zero(),
@@ -78,14 +75,25 @@ where
                     locale.t("button-restart"),
                     Alignment::Right,
                 ),
-                ButtonHint::new(
+            ];
+            // Sort keeps its own button. `sort()` rewrites this hint by index, so it has to stay
+            // at index 2 -- see the get_mut there.
+            if S::HAS_BUTTON_HINTS {
+                hints.push(ButtonHint::new(
                     res.clone(),
                     Point::zero(),
-                    Key::Select,
-                    locale.t("button-options"),
+                    Key::Y,
+                    sort.button_hint(&locale),
                     Alignment::Right,
-                ),
-            ];
+                ));
+            }
+            hints.push(ButtonHint::new(
+                res.clone(),
+                Point::zero(),
+                Key::Select,
+                locale.t("button-options"),
+                Alignment::Right,
+            ));
             ButtonHints::new(res.clone(), vec![], hints)
         };
 
@@ -178,7 +186,10 @@ where
         debug!("Selected entry: {:?}", self.entries.get(index));
     }
 
-    /// `restart` starts a game from the beginning instead of resuming its auto save state.
+    /// `restart` starts a game from the beginning rather than resuming its auto save state.
+    /// It is the flag the in-game menu's Reset entry already uses, so this is a new binding on
+    /// proven plumbing -- and note it does nothing for cores launched by path rather than through
+    /// RetroArch (DraStic, ffplay, native), which ignore it.
     async fn select_entry(&mut self, commands: Sender<Command>, restart: bool) -> Result<()> {
         if let Some(entry) = self.entries.get_mut(self.list.selected()) {
             match entry {
@@ -214,7 +225,7 @@ where
         if S::HAS_BUTTON_HINTS {
             self.button_hints
                 .right_mut()
-                .get_mut(1)
+                .get_mut(2)
                 .unwrap()
                 .set_text(self.sort.button_hint(&self.res.get::<Locale>()));
             self.button_hints.set_should_draw();
@@ -254,7 +265,6 @@ where
                     MenuEntry::Favorite(game.favorite),
                     MenuEntry::Launch(None),
                     MenuEntry::Reset,
-                    MenuEntry::Sort(self.sort.next().button_hint(&locale)),
                     MenuEntry::RemoveFromRecents,
                     MenuEntry::RepopulateDatabase,
                 ];
@@ -266,9 +276,7 @@ where
                     .map(|c| c.cores.clone())
                     .unwrap_or_default();
 
-                // With only one core there is nothing to pick, so keep the plain "Launch"
-                // label rather than implying a choice that doesn't exist.
-                if cores.len() > 1 {
+                if !cores.is_empty() {
                     let core = game.core.to_owned().unwrap_or_else(|| cores[0].clone());
                     let i = cores.iter().position(|c| c == &core).unwrap_or_default();
 
@@ -277,11 +285,7 @@ where
                         *launch_core = Some(console_mapper.get_core_name(&core));
                     }
 
-                    self.core = Some(CoreSelection {
-                        core: i,
-                        original: i,
-                        cores,
-                    });
+                    self.core = Some(CoreSelection { core: i, cores });
                 } else {
                     self.core = None;
                 }
@@ -292,7 +296,6 @@ where
                 vec![
                     MenuEntry::Launch(None),
                     MenuEntry::Reset,
-                    MenuEntry::Sort(self.sort.next().button_hint(&locale)),
                     MenuEntry::RemoveFromRecents,
                     MenuEntry::RepopulateDatabase,
                 ]
@@ -509,15 +512,9 @@ where
                         }
                         MenuEntry::Launch(_) => {
                             let entry = self.entries.get_mut(self.list.selected()).unwrap();
-                            // Only persist an override when the user actually changed the core;
-                            // writing it unconditionally would pin the game to whatever happened
-                            // to be the console default at the time.
-                            if let Some(selection) = self.core.as_ref()
-                                && selection.core != selection.original
-                                && let Entry::Game(game) = entry
-                            {
+                            if let (Some(core), Entry::Game(game)) = (self.core.as_ref(), entry) {
                                 let db = self.res.get::<Database>();
-                                let core = &selection.cores[selection.core];
+                                let core = &core.cores[core.core];
                                 db.set_core(&game.path, core)?;
                                 game.core = Some(core.to_string());
                             }
@@ -539,12 +536,6 @@ where
                                     }
                                 }
                             }
-                            commands.send(Command::Redraw).await?;
-                        }
-                        MenuEntry::Sort(_) => {
-                            self.sort(self.sort.next())?;
-                            self.menu = None;
-                            self.core = None;
                             commands.send(Command::Redraw).await?;
                         }
                         MenuEntry::RemoveFromRecents => {
@@ -639,6 +630,10 @@ where
                     self.select_entry(commands, true).await?;
                     Ok(true)
                 }
+                KeyEvent::Pressed(Key::Y) => {
+                    self.sort(self.sort.next())?;
+                    Ok(true)
+                }
                 KeyEvent::Pressed(Key::Select) => {
                     self.open_menu()?;
                     Ok(true)
@@ -685,8 +680,6 @@ enum MenuEntry {
     Favorite(bool),
     Launch(Option<String>),
     Reset,
-    /// Carries the label of the sort it switches to, so the row reads as the action it performs
-    Sort(String),
     RemoveFromRecents,
     RepopulateDatabase,
 }
@@ -712,7 +705,6 @@ impl MenuEntry {
                 }
             }
             MenuEntry::Reset => locale.t("menu-reset"),
-            MenuEntry::Sort(next) => next.clone(),
             MenuEntry::RemoveFromRecents => locale.t("menu-remove-from-recents"),
             MenuEntry::RepopulateDatabase => locale.t("menu-repopulate-database"),
         }

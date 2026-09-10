@@ -10,7 +10,6 @@ sort-most-played = Urut: Sering main
 sort-rating = Urut: Rating
 sort-release-date = Urut: Tanggal rilis
 sort-random = Urut: Acak
-sort-search = Cari
 sort-favorites = Urut: Favorit
 
 no-recent-games = Mainkan gim untuk memulai
@@ -23,7 +22,7 @@ populating-games = Refresh daftar gim... ({ $directory })
 menu-set-as-favorite = Tambahkan ke Favorit
 menu-unset-as-favorite = Hapus dari Favorit
 menu-launch = Mainkan
-menu-launch-with-core = Pilih emulator < { $core } >
+menu-launch-with-core = Pilih emulator { $core }
 menu-reset = Ulangi buka
 menu-remove-from-recents = Hapus dari tab Terakhir
 menu-repopulate-database = Refresh daftar gim di konsol
@@ -132,6 +131,18 @@ ingame-menu-disk = Diska { $disk }
 guide-button-search = Cari
 guide-button-next = Selanjutnya
 guide-button-prev = Sebelumnya
+
+# Hotkeys
+hotkeys-global = Pintasan tombol Umum:
+hotkeys-screenshot = Tangkap layar
+hotkeys-volume-down = Volume -
+hotkeys-volume-up = Volume +
+hotkeys-brightness-down = Kecerahan -
+hotkeys-brightness-up = Kecerahan +
+
+hotkeys-ingame = Pintasan saat main gim:
+hotkeys-toggle-aspect-ratio = Ganti skala layar
+hotkeys-toggle-fps = Tampilkan FPS
 
 # Common
 button-back = Kembali

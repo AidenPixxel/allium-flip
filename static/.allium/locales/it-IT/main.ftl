@@ -10,7 +10,6 @@ sort-most-played = Ordina: Attività
 sort-rating = Ordina: Valutazione
 sort-release-date = Ordina: Data di uscita
 sort-random = Ordina: Casuale
-sort-search = Cerca
 sort-favorites = Ordina: Preferiti
 
 no-recent-games = Avvia un gioco per iniziare
@@ -23,7 +22,7 @@ populating-games = Popolamento giochi... ({ $directory })
 menu-set-as-favorite = Aggiungi ai preferiti
 menu-unset-as-favorite = Rimuovi dai preferiti
 menu-launch = Avvia
-menu-launch-with-core = Avvia con < { $core } >
+menu-launch-with-core = Avvia con { $core }
 menu-reset = Reset
 menu-remove-from-recents = Rimuovi dai Recenti
 menu-repopulate-database = Rigenera Database
@@ -133,6 +132,18 @@ ingame-menu-disk = Disco { $disk }
 guide-button-search = Cerca
 guide-button-next = Successivo
 guide-button-prev = Precedente
+
+# Hotkeys
+hotkeys-global = Pulsanti Globali
+hotkeys-screenshot = Screenshot
+hotkeys-volume-down = Volume -
+hotkeys-volume-up = Volume +
+hotkeys-brightness-down = Luminosità -
+hotkeys-brightness-up = Luminosità +
+
+hotkeys-ingame = Pulsanti in Gioco:
+hotkeys-toggle-aspect-ratio = Proporzioni ON/OFF
+hotkeys-toggle-fps = FPS ON/OFF
 
 # Common
 button-back = Indietro

@@ -3,7 +3,6 @@
 
 mod alliumd;
 mod osd;
-mod osd_font;
 
 use anyhow::Result;
 use simple_logger::SimpleLogger;

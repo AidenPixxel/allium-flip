@@ -62,7 +62,7 @@ impl From<usize> for UpdateChannel {
 enum VersionCheckEvent {
     Found {
         release: GitHubRelease,
-        version: String, // Pre-resolved version string (includes commit hash for nightly)
+        version: String,
     },
     UpToDate,
     Error(String),
@@ -239,7 +239,6 @@ impl SystemUpdate {
         tokio::spawn(async move {
             match ota::check_for_update(channel).await {
                 Ok(Some(release)) => {
-                    // Resolve version string (fetches commit hash for nightly)
                     let version = ota::get_release_version(&release);
                     let _ = tx.send(VersionCheckEvent::Found { release, version });
                 }

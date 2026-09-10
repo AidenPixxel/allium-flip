@@ -4,21 +4,32 @@ A personal fork of [Allium](https://github.com/goweiwen/Allium), by Wei Wen Goh 
 for the **Miyoo Mini Flip**. Allium is a custom launcher for the Miyoo Mini family, in the spirit of
 [OnionOS](https://github.com/OnionUI/Onion) and [MiniUI](https://github.com/shauninman/MiniUI).
 
-This fork is trimmed to what one Flip needs and adds a handful of things on top. The upstream commit
-history is not preserved; see the original repository for it. Allium is MIT licensed — see
+This fork is rebuilt on upstream rather than diverged from it: it is upstream `main`, plus a trim to
+one device's core set, plus a chosen handful of features. Allium is MIT licensed — see
 [LICENSE](LICENSE).
 
 ## How this differs from upstream
 
-- **Flip only.** The core set is trimmed to the consoles actually used; the stock/Onion card layout
-  is still honoured.
-- **Display profiles**, replacing night mode: named presets of backlight, warmth and panel values,
-  cycled with Menu + Select and applied in the display controller so they cover games too. The
-  shipped **Night** profile drops the backlight and takes the panel to a deep amber.
-- **Power**: what happens when a charger wakes a powered-off device (charge screen, charge silently,
-  or stay off), and how long suspend lasts before powering off.
+- **Flip only.** 61 of upstream's 95 emulator cores and the PICO-8 wrapper are not shipped, which is
+  about 300 MB of card space. `consoles.toml` and `cores.toml` are deliberately left intact, so
+  dropping a core's `.so` and `.info` back into `RetroArch/.retroarch/cores` restores that system
+  with no configuration change — and 52 of the 85 listed consoles have no shipped core as a result.
+- **Display profiles.** Three named presets — Day, Night, Custom — each holding a full set of panel
+  values plus its own warmth and backlight brightness. Menu + Select rotates between them and shows
+  the name; they are applied in the display controller, so they cover games too.
+- **A flicker-free in-game indicator.** Volume, brightness and profile changes are handed to
+  RetroArch as its own on-screen message while a game is running, because a plate stamped into
+  RetroArch's framebuffer cannot be timed not to flicker. Everywhere else keeps the drawn plate.
+- **Power**: how long suspend lasts before powering off, and what happens when a charger wakes a
+  powered-off device — charge screen, charge silently, or stay off, decided before the backlight
+  comes on. Every Power row explains the option you are looking at.
+- **Wi-Fi that says why it failed**: Searching, Connecting, Getting IP address — then the likely
+  cause, rather than "Connecting..." forever.
 - **Updates over Wi-Fi**, no SD card: from the handheld's own Settings → System Update, or pushed
   from a computer — see [UPDATING.md](UPDATING.md).
+- **Launcher buttons**: A resumes, **X restarts from the beginning**, Y sorts, Select opens options.
+- **No game search.** Upstream searches games by name from a keyboard view; this fork does not, which
+  is what frees X. The guide reader keeps its own in-text search.
 - Hardening you will not see: settings files survive a bad write, the daemon survives a crashing
   launcher, Wi-Fi comes up with one supplicant, and LAN services start without internet access.
 
@@ -40,11 +51,11 @@ screen, pushed over Wi-Fi from a computer, or by card.
 
 - Stock / Onion / DotUI card layout, no configuration needed
 - Box art (250 px wide, PNG, JPG, GIF); `gameslist.xml` with nested folders
-- Favorites; recents by last played or playtime, with save-state previews; search
+- Favorites; recents by last played or playtime, with save-state previews
 - Activity tracker
-- RetroArch for every core, with per-game core selection
+- RetroArch for every shipped core, with per-game core selection
 - Volume and brightness on Menu + L/R/U/D, with an on-screen indicator
-- Display profiles (Menu + Select)
+- Display profiles on Menu + Select
 - In-game menu: save and load with screenshots, Emulator (RetroArch's own menu),
   [guides](https://github.com/goweiwen/Allium/wiki/In-game-Guide-Walkthrough-Reader), disk changer,
   reset, quit
@@ -74,21 +85,23 @@ screen, pushed over Wi-Fi from a computer, or by card.
 make simulator bin=allium-launcher
 make simulator bin=allium-menu
 ```
-There is none for `alliumd`. CI builds the simulator to catch breakage but does not run it.
+There is none for `alliumd`. CI builds the simulator because it shares almost every view with the
+device and nothing else compiles it — a launcher change that breaks it is a real break, and this is
+the job that catches it.
 
 ### Building and CI
-`make all` builds Allium and RetroArch and assembles `dist/`. CI runs `cargo fmt --check`, the tests,
-clippy in both the host and `miyoo` configurations, and `cargo deny`. A push to `main` that builds
-publishes a release tagged `v<version>-flip.<run>`; the format check, tests and clippy gate the
-build.
+`make all` builds Allium and RetroArch and assembles `dist/`. CI runs `cargo fmt --check`, the
+tests, clippy in both the host and `miyoo` configurations, the simulator, and `cargo deny`; the
+device build waits on all of them. A push to `main` that builds publishes a release tagged
+`v<version>-flip.<run>`.
 
-### The indicator font
-The volume/brightness line alliumd draws is a bitmap font compiled into the binary,
-`crates/alliumd/src/osd_font.rs`, generated from Spleen 6×12 so it matches RetroArch's in-game
-message pixel for pixel in layout. To regenerate after updating the BDF:
-```
-scripts/fonts/bdf_to_rust.py scripts/fonts/spleen-6x12.bdf crates/alliumd/src/osd_font.rs --version <release>
-```
+### RetroArch patches
+`patches/retroarch/` holds Allium's own patches to RetroArch's source. The Makefile copies them into
+RetroArch-patch's own `patches/` before the Docker build, since its Makefile applies every
+`patches/*.patch` in sorted order. That loop reports only the last patch's status, so
+`scripts/retroarch/verify-patches.sh` runs afterwards inside the container and fails the build if any
+Allium patch is missing from the built tree. A build directory that was already patched will not pick
+up a new one; run `make clean` in `third-party/RetroArch-patch` first.
 
 ### Deploying to hardware
 Over Wi-Fi: `scripts/push-update.sh <ip>`, or `make push DEVICE=<ip>` — see
@@ -104,11 +117,16 @@ in a git-ignored `local.mk`.
 
 ## Troubleshooting
 
-**Changes made in RetroArch's own menu don't survive closing the game.** RetroArch writes its
+**A game started with X loses settings I saved in RetroArch's own menu.** Known, and inherent to how
+Restart works here: it runs RetroArch against a temporary config with save-state auto-load turned
+off, and does not copy that config back when the game exits. Anything changed in RetroArch's menu
+during a Restart-launched session — hotkeys included — is discarded. Launch with **A** when those
+changes need to persist.
+
+**Other changes made in RetroArch's own menu don't survive closing the game.** RetroArch writes its
 `retroarch.cfg` back only when `config_save_on_exit` is on; cards set up with Onion-derived defaults
 have it off. In RetroArch: Settings → Configuration → **Save Configuration on Quit** → On, then Main
-Menu → Configuration File → **Save Current Configuration** once. Builds before 2026-09-09 had a
-second cause: games started with **Restart** discarded every save regardless of that setting.
+Menu → Configuration File → **Save Current Configuration** once.
 
 ## Acknowledgements
 
@@ -116,11 +134,10 @@ Allium is only possible thanks to the Miyoo Mini community, including but not li
 - eggs: RetroArch port, [many code samples](https://www.dropbox.com/sh/hqcsr1h1d7f8nr3/AABtSOygIX_e4mio3rkLetWTa), answering questions on Discord
 - [Onion team](https://github.com/OnionUI/Onion) (Aemiii91, Schmurtz, Totofaki, and more): maintaining a sane-defaults RetroArch configuration, and the huge village
 - kebabstorm: [Miyoo Mini resources](https://github.com/anzz1/miyoomini-resources)
-- shauninman: Allium is heavily inspired by [MiniUI](https://github.com/shauninman/MiniUI)'s simplicity and clean design
+- shauninman: Allium is heavily inspired by [MiniUI](https://github.com/shauninman/MiniUI) for its simplicity and clean design
 - [steward-fu](https://github.com/steward-fu): miraculous DraStic port
 - Early adopters and testers of Allium
 - [Icons8.com](https://icons8.com) for the icons used in the upstream wiki
-- [Frederic Cambus](https://github.com/fcambus/spleen) for Spleen, the bitmap font behind the on-screen indicator (BSD 2-Clause)
 
 ## Community
 

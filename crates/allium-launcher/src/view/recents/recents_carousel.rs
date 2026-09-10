@@ -65,13 +65,6 @@ impl RecentsCarousel {
                         locale.t("button-restart"),
                         Alignment::Right,
                     ),
-                    ButtonHint::new(
-                        res.clone(),
-                        Point::zero(),
-                        Key::Y,
-                        locale.t("sort-search"),
-                        Alignment::Right,
-                    ),
                 ],
             )
         };
@@ -206,7 +199,7 @@ impl RecentsCarousel {
         Ok(())
     }
 
-    /// `restart` starts the game from the beginning instead of resuming its auto save state.
+    /// `restart` starts from the beginning rather than resuming the auto save state.
     async fn launch_game(&mut self, commands: Sender<Command>, restart: bool) -> Result<()> {
         if let Some(game) = self.games.get_mut(self.selected) {
             let command =
@@ -299,10 +292,6 @@ impl View for RecentsCarousel {
             }
             KeyEvent::Pressed(Key::X) => {
                 self.launch_game(commands, true).await?;
-                Ok(true)
-            }
-            KeyEvent::Pressed(Key::Y) => {
-                commands.send(Command::StartSearch).await?;
                 Ok(true)
             }
             _ => Ok(false),
