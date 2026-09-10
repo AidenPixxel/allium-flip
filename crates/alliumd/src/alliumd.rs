@@ -282,13 +282,17 @@ impl AlliumD<DefaultPlatform> {
         info!("setting volume: {}", state.volume);
         platform.set_volume(state.volume)?;
 
+        info!("loading display settings");
+        // The active profile owns the backlight, so it -- not the stored slider position -- is
+        // what the device comes up at. `effective` folds in its warmth without baking it into
+        // the stored values, so the profile survives a reboot.
+        let display_settings = DisplaySettings::load()?;
+        let profile = display_settings.active().clone();
+        state.brightness = profile.brightness;
+
         info!("setting brightness: {}", state.brightness);
         platform.set_brightness(state.brightness)?;
-
-        info!("loading display settings");
-        // `effective` folds in the profile's warmth and dimness without baking them into the
-        // stored values, so the active profile survives a reboot.
-        platform.set_display_settings(&mut DisplaySettings::load()?.active().effective())?;
+        platform.set_display_settings(&mut profile.effective())?;
 
         let main = respawn_main().await;
         let locale = Locale::new(&LocaleSettings::load()?.lang);
@@ -923,8 +927,14 @@ impl AlliumD<DefaultPlatform> {
         // Draw first, matching add_volume/add_brightness
         self.show_osd_label(OsdKind::DisplayProfile, name);
 
+        // The backlight comes with the profile: switching to Night dims the lamp, and switching
+        // back to Day puts it where Day says it should be. Whatever Menu+Up/Down had it at is
+        // deliberately overridden -- that hotkey is a nudge, the profile is the baseline.
+        let profile = settings.active().clone();
+        self.state.brightness = profile.brightness;
+        self.platform.set_brightness(profile.brightness)?;
         self.platform
-            .set_display_settings(&mut settings.active().effective())?;
+            .set_display_settings(&mut profile.effective())?;
         settings.save()?;
         Ok(())
     }

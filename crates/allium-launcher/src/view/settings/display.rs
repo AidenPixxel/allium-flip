@@ -29,7 +29,7 @@ const ROW_RED: usize = 7;
 const ROW_GREEN: usize = 8;
 const ROW_BLUE: usize = 9;
 const ROW_WARMTH: usize = 10;
-const ROW_DIMNESS: usize = 11;
+const ROW_BRIGHTNESS: usize = 11;
 
 fn percentage(value: u8, min: u8) -> Box<dyn View> {
     Box::new(Percentage::new(
@@ -108,7 +108,7 @@ impl Display {
                 locale.t("settings-display-green"),
                 locale.t("settings-display-blue"),
                 locale.t("settings-display-warmth"),
-                locale.t("settings-display-dimness"),
+                locale.t("settings-display-brightness"),
             ],
             vec![
                 Box::new(Select::new(
@@ -141,7 +141,7 @@ impl Display {
                 percentage(profile.g, 0),
                 percentage(profile.b, 0),
                 percentage(profile.warmth, 0),
-                percentage(profile.dimness, 0),
+                percentage(profile.brightness, 0),
             ],
             styles.ui.ui_font.size + styles.ui.padding_y as u32,
         );
@@ -194,7 +194,7 @@ impl Display {
             ROW_GREEN => settings.active_mut().g = percent(),
             ROW_BLUE => settings.active_mut().b = percent(),
             ROW_WARMTH => settings.active_mut().warmth = percent(),
-            ROW_DIMNESS => settings.active_mut().dimness = percent(),
+            ROW_BRIGHTNESS => settings.active_mut().brightness = percent(),
             _ => return None,
         }
 
@@ -214,7 +214,7 @@ impl Display {
             (ROW_GREEN, profile.g, 0),
             (ROW_BLUE, profile.b, 0),
             (ROW_WARMTH, profile.warmth, 0),
-            (ROW_DIMNESS, profile.dimness, 0),
+            (ROW_BRIGHTNESS, profile.brightness, 0),
         ] {
             self.list.set_right(row, percentage(value, min));
         }

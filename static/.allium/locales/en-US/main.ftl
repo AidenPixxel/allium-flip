@@ -72,7 +72,7 @@ settings-display-screen-resolution = Screen Resolution
 settings-display-profile = Profile
 settings-display-profile-name = Profile Name
 settings-display-warmth = Warmth
-settings-display-dimness = Dimness
+settings-display-brightness = Brightness
 
 settings-theme = Theme
 settings-theme-theme = Theme

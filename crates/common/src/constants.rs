@@ -89,16 +89,19 @@ pub const MAX_VOLUME: i32 = 20;
 /// Brightness scale is 0..=MAX_BRIGHTNESS percent.
 pub const MAX_BRIGHTNESS: u8 = 100;
 
-/// Night mode dims the panel and cuts its green and blue channels, leaving red untouched, so the
-/// screen goes warm and dark for playing without light. These scale the user's base display
-/// settings; tune them here.
-pub const NIGHT_MODE_LUMINANCE_SCALE: f32 = 0.55;
-pub const NIGHT_MODE_GREEN_SCALE: f32 = 0.72;
-pub const NIGHT_MODE_BLUE_SCALE: f32 = 0.35;
-/// Floor for the scaled green/blue channels. The platform flattens all three channels back to
-/// neutral grey when *every* one of them falls below 15, which would cancel the tint entirely.
-/// Holding green and blue at 15 makes that condition unreachable whatever the user's base red is.
-pub const NIGHT_MODE_CHANNEL_FLOOR: u8 = 15;
+/// The warmth slider cuts green and blue and leaves red alone, so the panel goes amber for playing
+/// in the dark. These are the channel scales at warmth 100; tune them here.
+///
+/// Deep enough to read as candlelight rather than merely "less blue": from a neutral profile they
+/// land on roughly 1800-2000K. Dimming is not among them -- that is the backlight's job, and a
+/// profile carries its own brightness for it.
+pub const WARMTH_GREEN_SCALE: f32 = 0.55;
+pub const WARMTH_BLUE_SCALE: f32 = 0.10;
+/// The platform resets all three channels to neutral grey when *every* one of them falls below
+/// this, which would cancel the tint outright. Only reachable from a profile whose base red is
+/// itself this low, so `DisplayProfile::effective` lifts the whole set to clear it rather than
+/// clamping each channel -- clamping would cap how warm an ordinary profile can go.
+pub const PANEL_FLATTEN_THRESHOLD: u8 = 15;
 
 /// How long the daemon waits for a keypress before powering back off after a charger-triggered
 /// boot, so pressing Power while the cable is attached still turns the device on.

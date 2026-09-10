@@ -13,6 +13,26 @@ by what changed rather than by run number; the commit log has the detail.
   than queue behind it.
 
 ### Changed
+- **Night mode now dims the backlight.** A display profile carries its own **Brightness**, applied
+  when the profile becomes active — so Menu+Select into Night drops the lamp and back into Day
+  restores it. This replaces **Dimness**, which scaled the video signal while the backlight burned
+  just as hard: it lowered peak white but not the black level, costing contrast and saving no light.
+  Menu+Up/Down still nudges the live backlight; the next profile switch takes it back to that
+  profile's value.
+- **Warmth reaches a real amber.** At 100 it now leaves roughly 1800–2000K instead of 2500K. The old
+  per-channel floor that capped it was guarding against the panel's grey-flattening, which needs
+  *all three* channels below 15 and so could only ever happen to a profile whose own red was that
+  low; that case now lifts the whole set proportionally and keeps the tint.
+- **The brightness slider is spaced by ratio, not by difference.** Each step is the same multiple of
+  the last, and the dimmest setting is three times dimmer than before. Previously one step near the
+  bottom nearly tripled the light while one at the top changed it by a twentieth.
+- The shipped **Night** profile is set up for a dark room: brightness 20, warmth 100, saturation 35,
+  contrast 40, luminance untouched.
+
+**On upgrade:** a given brightness *number* now means less light — nudge it up once and it sticks.
+Warmth 100 is noticeably warmer than it was. Existing profiles that had Dimness above zero become
+dim-backlight profiles; the rest keep the brightness they had.
+
 - The indicator alliumd draws itself — in the launcher, the in-game menu and Allium's own apps — now
   looks exactly like RetroArch's in-game message: one line of white 2× bitmap text with a black drop
   shadow at the bottom left, no plate or icons, shown for three seconds. Same key press, same look,

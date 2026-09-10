@@ -8,8 +8,7 @@ use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{
-    ALLIUM_DISPLAY_SETTINGS, NIGHT_MODE_BLUE_SCALE, NIGHT_MODE_CHANNEL_FLOOR,
-    NIGHT_MODE_GREEN_SCALE, NIGHT_MODE_LUMINANCE_SCALE,
+    ALLIUM_DISPLAY_SETTINGS, PANEL_FLATTEN_THRESHOLD, WARMTH_BLUE_SCALE, WARMTH_GREEN_SCALE,
 };
 
 /// How many profiles are kept. The rotate hotkey cycles all of them, so keep it small enough to
@@ -20,10 +19,16 @@ pub const PROFILE_COUNT: usize = 3;
 pub const MAX_PROFILE_NAME_LEN: usize = 12;
 /// The platform raises anything lower, so never store a value the panel will not show.
 pub const MIN_CONTRAST: u8 = 10;
+/// The backlight a profile gets when it says nothing about one. Resolves to the same duty cycle
+/// the slider's old default did, so an upgrade does not change how bright the device looks.
+pub const DEFAULT_BRIGHTNESS: u8 = 85;
+/// ...and what the shipped Night profile uses: the dimmest the slider could reach before, which
+/// is a comfortable floor for a dark room with plenty of room left below it.
+pub const NIGHT_BRIGHTNESS: u8 = 20;
 
 /// One full set of panel values, under a name the user chooses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(from = "RawDisplayProfile")]
 pub struct DisplayProfile {
     pub name: String,
     pub luminance: u8,
@@ -35,9 +40,10 @@ pub struct DisplayProfile {
     pub b: u8,
     /// How far to cut green and blue, 0 (untouched) to 100 (the full warm shift).
     pub warmth: u8,
-    /// How far to dim, 0 (untouched) to 100 (the full dim). Independent of warmth, since wanting
-    /// one without the other is common.
-    pub dimness: u8,
+    /// The backlight this profile runs at, on the slider's own 0..=100 scale. Applied whenever
+    /// the profile becomes active, which is what makes switching to Night actually dim the lamp
+    /// and switching back to Day restore it.
+    pub brightness: u8,
 }
 
 impl DisplayProfile {
@@ -52,43 +58,115 @@ impl DisplayProfile {
             g: 50,
             b: 50,
             warmth: 0,
-            dimness: 0,
+            brightness: DEFAULT_BRIGHTNESS,
         }
     }
 
-    /// The values actually written to the panel: this profile's own values with its warmth and
-    /// dimness folded in. Never persisted, so turning a slider back down restores exactly what
-    /// was stored.
+    /// The values actually written to the panel: this profile's own values with its warmth folded
+    /// in. Never persisted, so turning the slider back down restores exactly what was stored.
+    ///
+    /// Only the colour channels move. Dimming belongs to `brightness` and the backlight: scaling
+    /// `luminance` instead, as this used to, lowers peak white while the lamp keeps lighting the
+    /// black level just as hard -- less contrast for no less light, which is the opposite of what
+    /// a dark room wants.
     pub fn effective(&self) -> Self {
         // Eases a scale between 1.0 (slider at 0) and `full` (slider at 100)
         fn strength(full: f32, percent: u8) -> f32 {
             1.0 - (1.0 - full) * f32::from(percent.min(100)) / 100.0
         }
 
-        fn scale(value: u8, factor: f32, floor: u8) -> u8 {
-            ((f32::from(value) * factor).round() as u8).max(floor)
+        fn scale(value: u8, factor: f32) -> u8 {
+            (f32::from(value) * factor).round() as u8
         }
 
-        Self {
-            luminance: scale(
-                self.luminance,
-                strength(NIGHT_MODE_LUMINANCE_SCALE, self.dimness),
-                1,
-            ),
-            // Cutting green and blue while leaving red alone is what warms the panel. The floor
-            // keeps both above the threshold at which the platform gives up and flattens all
-            // three channels back to neutral grey, which would cancel the tint outright.
-            g: scale(
-                self.g,
-                strength(NIGHT_MODE_GREEN_SCALE, self.warmth),
-                NIGHT_MODE_CHANNEL_FLOOR,
-            ),
-            b: scale(
-                self.b,
-                strength(NIGHT_MODE_BLUE_SCALE, self.warmth),
-                NIGHT_MODE_CHANNEL_FLOOR,
-            ),
+        // Cutting green and blue while leaving red alone is what warms the panel
+        let mut warmed = Self {
+            g: scale(self.g, strength(WARMTH_GREEN_SCALE, self.warmth)),
+            b: scale(self.b, strength(WARMTH_BLUE_SCALE, self.warmth)),
             ..self.clone()
+        };
+
+        // The platform resets all three channels to neutral grey when every one of them is under
+        // the threshold, cancelling the tint. Only a profile whose own red is that low can get
+        // there. Lift the set until its largest channel clears the threshold, keeping the ratio
+        // between them: clamping each channel instead -- what this did before -- would flatten
+        // the tint here rather than in the platform, and would stop an ordinary profile from
+        // reaching a deep amber at all.
+        let max = warmed.r.max(warmed.g).max(warmed.b);
+        if max < PANEL_FLATTEN_THRESHOLD {
+            if max == 0 {
+                // No ratio to preserve; any lift is as good as another
+                warmed.r = PANEL_FLATTEN_THRESHOLD;
+                warmed.g = PANEL_FLATTEN_THRESHOLD;
+                warmed.b = PANEL_FLATTEN_THRESHOLD;
+            } else {
+                let lift = f32::from(PANEL_FLATTEN_THRESHOLD) / f32::from(max);
+                warmed.r = scale(warmed.r, lift);
+                warmed.g = scale(warmed.g, lift);
+                warmed.b = scale(warmed.b, lift);
+            }
+        }
+        warmed
+    }
+}
+
+/// Mirror of every shape a profile has had, so none can be rejected.
+///
+/// `dimness` is the one that went: it scaled the signal rather than the backlight, so it cost
+/// contrast and saved no light. A profile that set it wanted a dark screen, which is now what
+/// `brightness` means -- so carry the intent across rather than the number.
+#[derive(Deserialize)]
+#[serde(default)]
+struct RawDisplayProfile {
+    name: String,
+    luminance: u8,
+    hue: u8,
+    saturation: u8,
+    contrast: u8,
+    r: u8,
+    g: u8,
+    b: u8,
+    warmth: u8,
+    brightness: Option<u8>,
+    dimness: Option<u8>,
+}
+
+impl Default for RawDisplayProfile {
+    fn default() -> Self {
+        let neutral = DisplayProfile::neutral("");
+        Self {
+            name: neutral.name,
+            luminance: neutral.luminance,
+            hue: neutral.hue,
+            saturation: neutral.saturation,
+            contrast: neutral.contrast,
+            r: neutral.r,
+            g: neutral.g,
+            b: neutral.b,
+            warmth: neutral.warmth,
+            brightness: None,
+            dimness: None,
+        }
+    }
+}
+
+impl From<RawDisplayProfile> for DisplayProfile {
+    fn from(raw: RawDisplayProfile) -> Self {
+        let brightness = raw.brightness.unwrap_or(match raw.dimness {
+            Some(dimness) if dimness > 0 => NIGHT_BRIGHTNESS,
+            _ => DEFAULT_BRIGHTNESS,
+        });
+        Self {
+            name: raw.name,
+            luminance: raw.luminance,
+            hue: raw.hue,
+            saturation: raw.saturation,
+            contrast: raw.contrast,
+            r: raw.r,
+            g: raw.g,
+            b: raw.b,
+            warmth: raw.warmth,
+            brightness,
         }
     }
 }
@@ -181,9 +259,14 @@ impl DisplaySettings {
     fn default_profile(index: usize) -> DisplayProfile {
         match index {
             0 => DisplayProfile::neutral("Day"),
+            // Everything a dark room wants: the lamp right down, a deep amber, and colour and
+            // contrast eased off so nothing on screen glares. Luminance stays put -- see
+            // `effective`.
             1 => DisplayProfile {
+                brightness: NIGHT_BRIGHTNESS,
                 warmth: 100,
-                dimness: 100,
+                saturation: 35,
+                contrast: 40,
                 ..DisplayProfile::neutral("Night")
             },
             _ => DisplayProfile::neutral("Custom"),
@@ -293,12 +376,28 @@ mod tests {
 
         // Day leaves the panel alone; Night is the warm, dim one
         let day = &settings.profiles[0];
-        assert_eq!((day.warmth, day.dimness), (0, 0));
+        assert_eq!(day.warmth, 0);
+        assert_eq!(day.brightness, DEFAULT_BRIGHTNESS);
         assert_eq!(day.effective(), day.clone());
 
-        let night = settings.profiles[1].effective();
-        assert!(night.luminance < settings.profiles[1].luminance);
-        assert!(night.b < night.g && night.g < night.r);
+        let stored = &settings.profiles[1];
+        assert!(
+            stored.brightness < day.brightness,
+            "Night dims the backlight, which is the whole point"
+        );
+        assert_eq!(
+            stored.luminance, day.luminance,
+            "dimming is the lamp's job, not the signal's"
+        );
+
+        let night = stored.effective();
+        assert!(night.b < night.g && night.g < night.r, "warm, not just dim");
+        assert!(
+            night.b * 4 < night.r,
+            "a deep amber: blue at {} against red at {}",
+            night.b,
+            night.r
+        );
     }
 
     #[test]
@@ -313,26 +412,66 @@ mod tests {
     #[test]
     fn effective_can_never_trip_the_platform_flatten() {
         // MiyooPlatform::set_display_settings resets r/g/b to 15 when *all three* fall below 15,
-        // which silently cancels the tint. The floor makes that unreachable, including from a
-        // base whose red is itself under the threshold.
-        for (r, g, b) in [(20, 20, 20), (10, 50, 50), (1, 1, 1)] {
+        // which silently cancels the tint. Reachable only from a base whose red is itself that
+        // low, and the lift has to keep it out of reach there too.
+        for (r, g, b) in [(20, 20, 20), (10, 50, 50), (1, 1, 1), (0, 0, 0)] {
             let profile = DisplayProfile {
                 r,
                 g,
                 b,
                 warmth: 100,
-                dimness: 100,
                 ..DisplayProfile::neutral("t")
             }
             .effective();
 
-            assert!(profile.g >= NIGHT_MODE_CHANNEL_FLOOR);
-            assert!(profile.b >= NIGHT_MODE_CHANNEL_FLOOR);
             assert!(
-                !(profile.r < 15 && profile.g < 15 && profile.b < 15),
+                !(profile.r < PANEL_FLATTEN_THRESHOLD
+                    && profile.g < PANEL_FLATTEN_THRESHOLD
+                    && profile.b < PANEL_FLATTEN_THRESHOLD),
                 "flatten would fire for base ({r}, {g}, {b})"
             );
         }
+    }
+
+    #[test]
+    fn an_ordinary_profile_reaches_a_deep_amber() {
+        // What the old per-channel floor of 15 prevented: blue could never fall below it, so the
+        // warmest the panel could get was a mild tint.
+        let warm = DisplayProfile {
+            warmth: 100,
+            ..DisplayProfile::neutral("t")
+        }
+        .effective();
+
+        assert_eq!(warm.r, 50, "red is never touched");
+        assert!(
+            warm.b < 10,
+            "blue almost gone, was floored at 15: {}",
+            warm.b
+        );
+        assert!(warm.g > warm.b && warm.g < warm.r);
+    }
+
+    #[test]
+    fn a_dimmed_profile_migrates_to_a_dim_backlight() {
+        // dimness scaled the signal and saved no light. A profile that set it wanted a dark
+        // screen, so it gets one that actually is dark; one that did not keeps its brightness.
+        let dimmed = r#"{"name":"Night","luminance":50,"hue":50,"saturation":50,
+            "contrast":50,"r":50,"g":50,"b":50,"warmth":100,"dimness":100}"#;
+        let parsed: DisplayProfile = serde_json::from_str(dimmed).unwrap();
+        assert_eq!(parsed.brightness, NIGHT_BRIGHTNESS);
+        assert_eq!(parsed.warmth, 100, "the rest of the profile is untouched");
+        assert_eq!(parsed.luminance, 50, "no longer scaled down");
+
+        let plain = r#"{"name":"Day","luminance":40,"dimness":0}"#;
+        let parsed: DisplayProfile = serde_json::from_str(plain).unwrap();
+        assert_eq!(parsed.brightness, DEFAULT_BRIGHTNESS);
+        assert_eq!(parsed.luminance, 40);
+
+        // A profile written by this build round-trips its brightness rather than re-migrating
+        let current = r#"{"name":"X","brightness":42,"dimness":100}"#;
+        let parsed: DisplayProfile = serde_json::from_str(current).unwrap();
+        assert_eq!(parsed.brightness, 42);
     }
 
     #[test]

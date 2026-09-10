@@ -14,8 +14,9 @@ history is not preserved; see the original repository for it. Allium is MIT lice
   is still honoured.
 - **Per-game CPU speed.** Six governor presets, set from the in-game menu's **Speed** row and applied
   instantly; the global default is under Settings → Power.
-- **Display profiles**, replacing night mode: named warmth and dimness presets, cycled with
-  Menu + Select, applied in the display controller so they cover games too.
+- **Display profiles**, replacing night mode: named presets of backlight, warmth and panel values,
+  cycled with Menu + Select and applied in the display controller so they cover games too. The
+  shipped **Night** profile drops the backlight and takes the panel to a deep amber.
 - **Power**: what happens when a charger wakes a powered-off device (charge screen, charge silently,
   or stay off), and how long suspend lasts before powering off.
 - **Updates over Wi-Fi**, no SD card: from the handheld's own Settings → System Update, or pushed

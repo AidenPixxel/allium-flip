@@ -220,15 +220,19 @@ impl AlliumLauncher<DefaultPlatform> {
             Command::ApplyDisplaySettings(settings) => {
                 // Live preview: drive the panel but leave display.json alone, so holding a
                 // slider doesn't write to the SD card on every keypress
+                let profile = settings.active().clone();
+                self.platform.set_brightness(profile.brightness)?;
                 self.platform
-                    .set_display_settings(&mut settings.active().effective())?;
+                    .set_display_settings(&mut profile.effective())?;
             }
             Command::SaveDisplaySettings(settings) => {
                 debug!("saving display settings");
-                // Apply through `effective` so the profile's warmth and dimness are folded in,
-                // and persist the untouched stored values.
+                // Apply through `effective` so the profile's warmth is folded in, and persist the
+                // untouched stored values.
+                let profile = settings.active().clone();
+                self.platform.set_brightness(profile.brightness)?;
                 self.platform
-                    .set_display_settings(&mut settings.active().effective())?;
+                    .set_display_settings(&mut profile.effective())?;
                 settings.save()?;
             }
             Command::SaveLocaleSettings(settings) => {

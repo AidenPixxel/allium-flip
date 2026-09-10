@@ -1,3 +1,4 @@
+pub mod backlight;
 pub mod color;
 pub mod font;
 pub mod image;

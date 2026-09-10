@@ -3,26 +3,27 @@ use std::io::Write;
 
 use anyhow::{Context, Result};
 
+use crate::display::backlight;
+
 pub fn get_brightness() -> Result<u8> {
-    Ok(
+    let duty: u32 =
         fs::read_to_string("/sys/devices/soc0/soc/1f003400.pwm/pwm/pwmchip0/pwm0/duty_cycle")?
             .trim()
-            .parse()?,
-    )
+            .parse()?;
+    Ok(backlight::brightness_for(duty))
 }
 
 pub fn set_brightness(brightness: u8) -> Result<()> {
     File::create("/sys/devices/soc0/soc/1f003400.pwm/pwm/pwmchip0/pwm0/duty_cycle")
         .context("failed to open pwm/duty_cycle")?
-        .write_all(format!("{}", brightness.max(3)).as_bytes())?;
+        .write_all(format!("{}", backlight::duty_for(brightness)).as_bytes())?;
     Ok(())
 }
 
 /// Cuts power to the backlight, or restores it.
 ///
-/// Something `set_brightness` cannot express: it floors its argument at 3 so the brightness slider
-/// can never leave the user looking at a black screen, which means writing 0 there still leaves the
-/// backlight burning. Suspend wants it genuinely off.
+/// Something `set_brightness` cannot express: its dimmest duty cycle is still lit, so that the
+/// slider can never leave the user looking at a black screen. Suspend wants it genuinely off.
 ///
 /// Addressed through `/sys/class` rather than the `/sys/devices/soc0/...` path used above. They are
 /// two views of the same channel, but `/sys/class` is the spelling the boot script already writes
