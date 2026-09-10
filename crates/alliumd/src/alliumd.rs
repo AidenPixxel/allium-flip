@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::fs::{self, File};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -144,6 +144,51 @@ impl AlliumDState {
     }
 }
 
+/// The auto-save's path, from RetroArch's reply to `GET_PATH savestate`.
+///
+/// The reply names the *current* slot's file: `<name>.state` for slot 0, `<name>.stateN` for
+/// slot N, `<name>.state.auto` for the auto slot. The auto-save is always the last of those, so
+/// strip the slot digits and add the suffix.
+fn auto_save_path(reply: &str) -> Option<PathBuf> {
+    let path = reply
+        .trim()
+        .strip_prefix("GET_PATH")?
+        .trim_start()
+        .strip_prefix("savestate")?
+        .trim();
+    if path.is_empty() {
+        return None;
+    }
+    if path.ends_with(".auto") {
+        return Some(PathBuf::from(path));
+    }
+    let base = path.trim_end_matches(|c: char| c.is_ascii_digit());
+    Some(PathBuf::from(format!("{base}.auto")))
+}
+
+/// Waits until `path` exists and has stopped growing: two reads `SAVE_STATE_SETTLE_POLL` apart
+/// that agree and are not zero. Gives up after `SAVE_STATE_SETTLE_CAP`.
+async fn wait_for_file_to_settle(path: &Path) {
+    let deadline = tokio::time::Instant::now() + SAVE_STATE_SETTLE_CAP;
+    let mut last = None;
+    while tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(SAVE_STATE_SETTLE_POLL).await;
+        let len = fs::metadata(path)
+            .map(|meta| meta.len())
+            .ok()
+            .filter(|&len| len > 0);
+        if len.is_some() && len == last {
+            return;
+        }
+        last = len;
+    }
+    warn!(
+        "auto-save at {} did not settle within {:?}; suspending anyway",
+        path.display(),
+        SAVE_STATE_SETTLE_CAP
+    );
+}
+
 /// Sleeps until `deadline`, or forever when there is none — the select! arm needs no precondition
 async fn sleep_until_wake(deadline: Option<tokio::time::Instant>) {
     match deadline {
@@ -157,6 +202,14 @@ const CRASH_LOOP_WINDOW: std::time::Duration = std::time::Duration::from_secs(10
 /// ...and this many of them means the child is not coming up: pause before the next attempt
 const CRASH_LOOP_EXITS: usize = 3;
 const CRASH_LOOP_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
+/// How often the auto-save is re-measured while it is still being written...
+const SAVE_STATE_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+/// ...and how long that is allowed to go on. RetroArch writes a state in 100 KB pieces, one per
+/// frame, so a few megabytes is around a second; past this something is wrong, and the suspend
+/// must not be held hostage by it.
+const SAVE_STATE_SETTLE_CAP: std::time::Duration = std::time::Duration::from_secs(2);
+/// The head start the write gets when its file cannot be found to watch
+const SAVE_STATE_SETTLE_FALLBACK: std::time::Duration = std::time::Duration::from_millis(500);
 /// How long to wait before trying again when the spawn itself fails
 const RESPAWN_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -683,6 +736,7 @@ impl AlliumD<DefaultPlatform> {
     async fn handle_suspend(&mut self) -> Result<()> {
         info!("suspending...");
         self.hide_osd();
+        self.save_state_for_suspend().await;
         #[allow(clippy::let_unit_value)]
         let ctx = self.platform.suspend()?;
         signal(&self.main, Signal::SIGSTOP)?;
@@ -731,12 +785,63 @@ impl AlliumD<DefaultPlatform> {
         self.platform.unsuspend(ctx)
     }
 
+    /// Asks RetroArch for an auto-save before the game is stopped.
+    ///
+    /// Suspend is SIGSTOP and a dark panel: the game is only ever in RAM. A flat battery, a hard
+    /// reset or a fall while suspended loses everything since RetroArch's last own auto-save, which
+    /// it writes on exit -- so before stopping it, have it write one now. `SAVE_STATE_SLOT -1` is
+    /// the bundled RetroArch patch's name for the auto-save slot: it writes the `.state.auto` file
+    /// that auto-load reads, leaves the current slot alone, and replies once the core has been
+    /// serialised. The file itself is written afterwards in 100 KB pieces, one per frame, so the
+    /// reply alone is not safe to stop on; the file is watched until it stops growing.
+    ///
+    /// Never fails: an error out of the suspend handler is a reboot, and a suspend that saved
+    /// nothing is exactly what used to happen. With the in-game menu open RetroArch is paused and
+    /// the write may not progress until wake; the snapshot is still taken, and a shutdown from
+    /// suspend goes through RetroArch's own exit save as well.
+    async fn save_state_for_suspend(&self) {
+        // `has_menu` is only ever set for RetroArch. Read without `GameInfo::load()`, which also
+        // spawns swap-on.sh. Unlike `retroarch_in_foreground`, the in-game menu being open is no
+        // reason not to save: the game is paused behind it, not gone.
+        if !self.is_ingame()
+            || !state_file::load::<GameInfo>(ALLIUM_GAME_INFO.as_path(), "game info")
+                .is_some_and(|game| game.has_menu)
+        {
+            return;
+        }
+
+        if !matches!(
+            RetroArchCommand::SaveStateSlot(-1).send_recv().await,
+            Ok(Some(_))
+        ) {
+            warn!("RetroArch did not confirm the auto-save before suspend; suspending anyway");
+            return;
+        }
+
+        let path = match RetroArchCommand::GetPath("savestate").send_recv().await {
+            Ok(Some(reply)) => auto_save_path(&reply),
+            _ => None,
+        };
+        match path {
+            Some(path) => {
+                wait_for_file_to_settle(&path).await;
+                info!("auto-save written to {} before suspend", path.display());
+            }
+            // Serialised, but of unknown whereabouts: a fixed head start is all that can be given
+            None => tokio::time::sleep(SAVE_STATE_SETTLE_FALLBACK).await,
+        }
+        // Onto the card, which is the whole point
+        if let Ok(mut sync) = Command::new("sync").spawn() {
+            let _ = sync.wait().await;
+        }
+    }
+
     /// Undoes a suspend, then shuts down properly.
     ///
     /// The SIGCONT has to come first. `handle_quit` sends SIGTERM and gives the child five seconds,
     /// and a stopped process cannot run its handler -- so without this RetroArch never writes its
-    /// auto-save and is SIGKILLed instead. That auto-save is the only thing saving the game;
-    /// alliumd sends no save-state command on any shutdown path.
+    /// exit auto-save and is SIGKILLed instead. `save_state_for_suspend` has already saved the
+    /// game by then, but the SRAM is flushed only by that exit path, so it still matters.
     #[cfg(unix)]
     async fn wake_and_quit(
         &mut self,
@@ -994,4 +1099,42 @@ fn signal(child: &Child, signal: Signal) -> Result<()> {
         kill(pid, signal)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auto_save_path_follows_retroarch_naming() {
+        // Slot 0 is the bare name, slot N has the digit appended, the auto slot has ".auto"
+        let cases = [
+            ("GET_PATH savestate /s/Game.state", "/s/Game.state.auto"),
+            ("GET_PATH savestate /s/Game.state3\n", "/s/Game.state.auto"),
+            ("GET_PATH savestate /s/Game.state12", "/s/Game.state.auto"),
+            (
+                "GET_PATH savestate /s/Game.state.auto",
+                "/s/Game.state.auto",
+            ),
+            // A name that ends in digits keeps them: only the slot suffix is stripped
+            (
+                "GET_PATH savestate /s/Mega Man 2.state",
+                "/s/Mega Man 2.state.auto",
+            ),
+        ];
+        for (reply, expected) in cases {
+            assert_eq!(
+                auto_save_path(reply).as_deref(),
+                Some(Path::new(expected)),
+                "{reply:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn auto_save_path_rejects_other_replies() {
+        assert_eq!(auto_save_path("GET_PATH content /roms/x.gba"), None);
+        assert_eq!(auto_save_path("GET_PATH savestate "), None);
+        assert_eq!(auto_save_path("GET_INFO 1 0"), None);
+    }
 }

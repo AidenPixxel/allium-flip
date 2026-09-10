@@ -49,6 +49,10 @@ pub enum RetroArchCommand {
     SetStateSlot(i8),
     SaveStateSlot(i8),
     LoadStateSlot(i8),
+    /// One of RetroArch's paths, by the names its `GET_PATH` command takes -- `content`, `core`,
+    /// `config`, `savestate` and so on. `savestate` is the *current* slot's file. Replies
+    /// `GET_PATH <name> <path>`.
+    GetPath(&'static str),
     /// One line of text in RetroArch's own OSD, drawn inside the frame it presents and so unable
     /// to flicker. With this fork's RetroArch patch it replaces whatever message is showing rather
     /// than queueing behind it. The bitmap font is ASCII only; keep it under about fifty columns.
@@ -156,6 +160,7 @@ impl RetroArchCommand {
             RetroArchCommand::SetStateSlot(slot) => Cow::Owned(format!("SET_STATE_SLOT {slot}")),
             RetroArchCommand::SaveStateSlot(slot) => Cow::Owned(format!("SAVE_STATE_SLOT {slot}")),
             RetroArchCommand::LoadStateSlot(slot) => Cow::Owned(format!("LOAD_STATE_SLOT {slot}")),
+            RetroArchCommand::GetPath(what) => Cow::Owned(format!("GET_PATH {what}")),
             RetroArchCommand::ShowMsg(text) => Cow::Owned(format!("SHOW_MSG {text}")),
         }
     }
