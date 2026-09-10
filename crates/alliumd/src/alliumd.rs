@@ -810,7 +810,7 @@ impl AlliumD<DefaultPlatform> {
         }
 
         let file = File::open(ALLIUM_GAME_INFO.as_path())?;
-        let mut game_info: GameInfo = serde_json::from_reader(file)?;
+        let game_info: GameInfo = serde_json::from_reader(file)?;
 
         let duration = game_info.play_time();
 

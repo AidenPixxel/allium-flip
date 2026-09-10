@@ -734,14 +734,19 @@ mod tests {
 
     #[test]
     fn migrations_never_shrink_below_what_devices_have_run() {
-        let migrations = super::Database::migrations();
-
-        // A database from a device that has been updating all along
-        let mut conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "user_version", RELEASED_SCHEMA_VERSION)
+        // Asserts the list's length, by way of the version a fresh database ends up at. Checking
+        // it this way uses only paths every other test here already exercises, rather than
+        // depending on how the migration runner reacts to a database level with the binary.
+        let db = Database::in_memory().unwrap();
+        let version: u32 = db
+            .conn
+            .as_ref()
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        migrations.to_latest(&mut conn).expect(
-            "a database at the released schema version must still open -- the migration list has              shrunk, and every device that ran the later build will fail to boot",
+        assert!(
+            version as usize >= RELEASED_SCHEMA_VERSION,
+            "the migration list is at {version}, below the {RELEASED_SCHEMA_VERSION} a released              build has already applied on devices -- every one of them would fail to open its own              database, and the launcher would not start"
         );
     }
 

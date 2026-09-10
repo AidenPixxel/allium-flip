@@ -5,12 +5,12 @@ use async_trait::async_trait;
 use common::command::Command;
 use common::constants::RECENT_GAMES_LIMIT;
 use common::database::Database;
-use common::geom::{Alignment, Point, Rect};
+use common::geom::{Point, Rect};
 use common::locale::Locale;
-use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
+use common::platform::{DefaultPlatform, KeyEvent, Platform};
 use common::resources::Resources;
 use common::stylesheet::Stylesheet;
-use common::view::{ButtonHint, ButtonHints, View};
+use common::view::{ButtonHints, View};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::Sender;
 
