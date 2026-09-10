@@ -1,4 +1,5 @@
 mod battery;
+mod cpu;
 mod evdev;
 mod framebuffer;
 mod screen;
@@ -35,6 +36,10 @@ pub struct SuspendContext {
     /// Without this, a failed switch-off followed by a successful switch-on would be harmless, but
     /// the reverse would leave the panel dark with no way back.
     backlight_off: bool,
+    /// Whether the panel's power line was pulled low, for the same reason
+    panel_off: bool,
+    /// The cpufreq governor in place before the clock was floored, or `None` if that failed
+    governor: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,14 +139,47 @@ impl Platform for MiyooPlatform {
             }
         };
 
+        // With the PWM stopped, take the panel's power as well. Same terms as the backlight: a
+        // failure is logged and the panel stays merely dark.
+        let panel_off = match screen::set_panel_power(false) {
+            Ok(()) => true,
+            Err(err) => {
+                warn!("could not power the panel down: {err}");
+                false
+            }
+        };
+
+        // Last, with nothing left to draw: the clock stays pinned at 1.2 GHz otherwise, SIGSTOP or
+        // not, and that is most of what a suspended device spends its battery on.
+        let governor = match cpu::floor() {
+            Ok(governor) => Some(governor),
+            Err(err) => {
+                warn!("could not floor the CPU clock: {err}");
+                None
+            }
+        };
+
         Ok(SuspendContext {
             brightness,
             backlight_off,
+            panel_off,
+            governor,
         })
     }
 
     fn unsuspend(&self, ctx: Self::SuspendContext) -> Result<()> {
-        // Duty cycle before the light, then the picture last
+        // The clock first, so everything after it runs at speed
+        if let Some(governor) = ctx.governor.as_deref()
+            && let Err(err) = cpu::restore(governor)
+        {
+            warn!("could not restore the cpufreq governor: {err}");
+        }
+        // Power before duty cycle before the light, then the picture last
+        if ctx.panel_off
+            && let Err(err) = screen::set_panel_power(true)
+        {
+            warn!("could not power the panel back up: {err}");
+        }
         screen::set_brightness(ctx.brightness)?;
         if ctx.backlight_off
             && let Err(err) = screen::set_backlight(true)
