@@ -11,12 +11,12 @@ use chrono::{DateTime, Duration, Utc};
 use common::battery::Battery;
 use common::constants::{
     ALLIUM_GAME_INFO, ALLIUM_LAUNCHER, ALLIUM_SD_ROOT, ALLIUM_VERSION, ALLIUMD_STATE,
-    BATTERY_SHUTDOWN_THRESHOLD, BATTERY_UPDATE_INTERVAL, BATTERY_WARNING_THRESHOLD, IDLE_TIMEOUT,
-    MAX_BRIGHTNESS, MAX_VOLUME,
+    BATTERY_SHUTDOWN_THRESHOLD, BATTERY_UPDATE_INTERVAL, BATTERY_WARNING_THRESHOLD,
+    CHARGE_POWER_OFF_GRACE, MAX_BRIGHTNESS, MAX_VOLUME,
 };
 use common::display::settings::DisplaySettings;
 use common::locale::{Locale, LocaleSettings};
-use common::power::{PowerButtonAction, PowerSettings, VolumeOnStartup};
+use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
 use common::retroarch::RetroArchCommand;
 use common::state_file;
 use common::stylesheet::Stylesheet;
@@ -309,7 +309,8 @@ impl AlliumD<DefaultPlatform> {
 
             let mut battery_interval = Instant::now();
 
-            // If battery is charging, suspend.
+            // Charging at this point means the device was booted by the charger being plugged in
+            // (or by the user pressing Power with the cable already attached).
             let mut battery = self.platform.battery()?;
             // Every error out of this function is a reboot, so a single failed reading -- axp_test
             // slow to answer, say -- must not be one. Not charging is the safe assumption.
@@ -317,7 +318,11 @@ impl AlliumD<DefaultPlatform> {
                 warn!("failed to read the battery at startup: {}", e);
             }
             if battery.charging() {
-                self.handle_charging().await?;
+                match self.charging_boot_action() {
+                    ChargingBootAction::ChargeScreen => self.handle_charging(true).await?,
+                    ChargingBootAction::ChargeSilently => self.handle_charging(false).await?,
+                    ChargingBootAction::PowerOff => self.handle_charging_power_off().await?,
+                }
             }
 
             let mut battery_led_task = None;
@@ -574,23 +579,80 @@ impl AlliumD<DefaultPlatform> {
         Ok(())
     }
 
+    /// The configured charging boot action, falling back to charging silently where the board
+    /// cannot actually power off (`shutdown` would reboot straight back into this branch).
     #[cfg(unix)]
-    async fn handle_charging(&mut self) -> Result<()> {
+    fn charging_boot_action(&self) -> ChargingBootAction {
+        let action = self.power_settings.charging_boot_action;
+        if action == ChargingBootAction::PowerOff && !DefaultPlatform::can_power_off() {
+            warn!("this device cannot power off, charging silently instead");
+            return ChargingBootAction::ChargeSilently;
+        }
+        action
+    }
+
+    /// Power back down after a charger-triggered boot, unless the user is actually trying to
+    /// turn the device on. We can't tell those two apart here -- both look like "charging at
+    /// startup" -- so wait briefly for a keypress first.
+    ///
+    /// This is only the fallback. `.tmp_update/updater` makes the same decision before the
+    /// backlight is switched on, which is the only way to avoid lighting the panel at all; by the
+    /// time this runs the boot has finished and the launcher is painting. Blank the screen so at
+    /// least the remaining second is dark.
+    #[cfg(unix)]
+    async fn handle_charging_power_off(&mut self) -> Result<()> {
+        info!("charging, powering off unless a key is pressed");
+
+        self.hide_osd();
+
+        #[allow(clippy::let_unit_value)]
+        let ctx = self.platform.suspend()?;
+
+        // `poll` only ever resolves on a real key or lid event, so anything at all here means a
+        // person is at the device.
+        let woken = tokio::select! {
+            _ = self.platform.poll() => true,
+            _ = tokio::time::sleep(CHARGE_POWER_OFF_GRACE) => false,
+        };
+
+        if woken {
+            info!("key pressed while charging, booting normally");
+            return self.platform.unsuspend(ctx);
+        }
+
+        self.platform.shutdown()?;
+
+        // shutdown execs `poweroff`, so reaching here means it failed to replace us. Returning
+        // would let the event loop carry on and, once alliumd exits, the updater's unconditional
+        // reboot loop would boot us straight back into this -- so park instead.
+        error!("poweroff did not take effect, holding to avoid a boot loop");
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
+    }
+
+    /// Park in the charge screen until the user presses Power or unplugs the cable. With
+    /// `announce` the display lights up and says "Charging" first; without it the screen is never
+    /// turned on at all.
+    #[cfg(unix)]
+    async fn handle_charging(&mut self, announce: bool) -> Result<()> {
         info!("charging...");
 
         self.hide_osd();
 
         signal(&self.main, Signal::SIGSTOP)?;
 
-        Command::new("say")
-            .arg(self.locale.t("charging"))
-            .spawn()?
-            .wait()
-            .await?;
+        if announce {
+            Command::new("say")
+                .arg(self.locale.t("charging"))
+                .spawn()?
+                .wait()
+                .await?;
 
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
-        Command::new("show").arg("-c").spawn()?.wait().await?;
+            Command::new("show").arg("-c").spawn()?.wait().await?;
+        }
 
         #[allow(clippy::let_unit_value)]
         let ctx = self.platform.suspend()?;
@@ -625,6 +687,18 @@ impl AlliumD<DefaultPlatform> {
         let ctx = self.platform.suspend()?;
         signal(&self.main, Signal::SIGSTOP)?;
 
+        // A fixed point in time rather than a fresh sleep per pass: the loop re-enters on every key
+        // event it discards, so a countdown built inside it restarts on any stray press -- hardly
+        // visible at five minutes, very visible at ninety. Anything at or below zero means Never;
+        // clamping a negative to zero would instead shut a hand-edited device down on the spot.
+        let deadline = match self.power_settings.suspend_shutdown_minutes {
+            minutes if minutes <= 0 => None,
+            minutes => {
+                Some(tokio::time::Instant::now() + std::time::Duration::new(minutes as u64 * 60, 0))
+            }
+        };
+        let mut battery = self.platform.battery()?;
+
         loop {
             tokio::select! {
                 key_event = self.platform.poll()=> {
@@ -634,12 +708,20 @@ impl AlliumD<DefaultPlatform> {
                         break;
                     }
                 }
-                _ = tokio::time::sleep(IDLE_TIMEOUT) => {
-                    info!("idle timeout, shutting down");
-                    signal(&self.main, Signal::SIGCONT)?;
-                    self.platform.unsuspend(ctx)?;
-                    self.handle_quit().await?;
-                    return Ok(());
+                // The outer loop's battery check is parked while we sit in here, and this suspend
+                // only blanks the panel -- the SoC still runs. Without this, a device suspended
+                // near empty would draw idle current until the deadline and go flat, which loses
+                // the game: a flat battery gets no clean shutdown.
+                _ = tokio::time::sleep(BATTERY_UPDATE_INTERVAL) => {
+                    battery.update()?;
+                    if battery.percentage() <= BATTERY_SHUTDOWN_THRESHOLD && !battery.charging() {
+                        warn!("battery is low while suspended, shutting down");
+                        return self.wake_and_quit(ctx).await;
+                    }
+                }
+                _ = sleep_until_wake(deadline) => {
+                    info!("suspend timeout, shutting down");
+                    return self.wake_and_quit(ctx).await;
                 }
             }
         }
@@ -647,6 +729,22 @@ impl AlliumD<DefaultPlatform> {
         info!("waking up from suspend...");
         signal(&self.main, Signal::SIGCONT)?;
         self.platform.unsuspend(ctx)
+    }
+
+    /// Undoes a suspend, then shuts down properly.
+    ///
+    /// The SIGCONT has to come first. `handle_quit` sends SIGTERM and gives the child five seconds,
+    /// and a stopped process cannot run its handler -- so without this RetroArch never writes its
+    /// auto-save and is SIGKILLed instead. That auto-save is the only thing saving the game;
+    /// alliumd sends no save-state command on any shutdown path.
+    #[cfg(unix)]
+    async fn wake_and_quit(
+        &mut self,
+        ctx: <DefaultPlatform as Platform>::SuspendContext,
+    ) -> Result<()> {
+        signal(&self.main, Signal::SIGCONT)?;
+        self.platform.unsuspend(ctx)?;
+        self.handle_quit().await
     }
 
     #[cfg(unix)]

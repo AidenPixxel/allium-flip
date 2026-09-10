@@ -70,6 +70,13 @@ pub trait Platform {
 
     fn has_lid() -> bool;
 
+    /// Whether [`Platform::shutdown`] actually powers the device off. False where the board has no
+    /// PMIC power-off and can only reboot, which would turn "power off while charging" into a boot
+    /// loop.
+    fn can_power_off() -> bool {
+        true
+    }
+
     /// Discard any input queued since the last poll.
     ///
     /// The kernel gives every open handle on the input device its own buffer and copies each event

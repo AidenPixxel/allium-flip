@@ -18,6 +18,22 @@ pub fn set_brightness(brightness: u8) -> Result<()> {
     Ok(())
 }
 
+/// Cuts power to the backlight, or restores it.
+///
+/// Something `set_brightness` cannot express: it floors its argument at 3 so the brightness slider
+/// can never leave the user looking at a black screen, which means writing 0 there still leaves the
+/// backlight burning. Suspend wants it genuinely off.
+///
+/// Addressed through `/sys/class` rather than the `/sys/devices/soc0/...` path used above. They are
+/// two views of the same channel, but `/sys/class` is the spelling the boot script already writes
+/// this exact node with, which is the only evidence available that the write lands.
+pub fn set_backlight(on: bool) -> Result<()> {
+    File::create("/sys/class/pwm/pwmchip0/pwm0/enable")
+        .context("failed to open pwm/enable")?
+        .write_all(if on { b"1" } else { b"0" })?;
+    Ok(())
+}
+
 pub fn blank(blank: bool) -> Result<()> {
     File::create("/proc/mi_modules/fb/mi_fb0")
         .context("failed to open mi_fb0")?
