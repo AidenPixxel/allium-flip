@@ -398,26 +398,6 @@ ON CONFLICT(path) DO UPDATE SET name = ?, image = ?, core = ?, rating = ?, relea
         Ok(results)
     }
 
-    /// Search for games by name. The query is a prefix search on words, so "Fi" will match both "Fire Emblem" and "Pokemon Fire Red".
-    pub fn search(&self, query: &str, limit: i64) -> Result<Vec<Game>> {
-        if query.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let conn = self.conn.as_ref().unwrap();
-
-        let mut stmt = conn.prepare("SELECT games.name, games.path, image, play_count, play_time, last_played, core, rating, release_date, games.developer, games.publisher, genres, favorite, screenshot_path FROM games JOIN games_fts ON games.id = games_fts.rowid WHERE games_fts MATCH ? LIMIT ?")?;
-
-        let query =
-            format!("name:\"{query}\" * OR developer:\"{query}\" * OR publisher:\"{query}\" *");
-        let results = stmt
-            .query_map(params![query, limit], map_game)?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        Ok(results)
-    }
-
     pub fn select_games_in_directory(&self, path: &Path) -> Result<Vec<Game>> {
         trace!("select_games_in_directory({:?})", path);
         let conn = self.conn.as_ref().unwrap();
@@ -953,58 +933,6 @@ mod tests {
         assert_eq!(by_release_date.len(), 2);
         assert_eq!(by_release_date[0].path, games[0].path);
         assert_eq!(by_release_date[1].path, games[1].path);
-    }
-
-    #[test]
-    fn test_search() {
-        let database = Database::in_memory().unwrap();
-
-        let games = vec![
-            NewGame {
-                name: "Game One".to_owned(),
-                path: PathBuf::from("test_directory/Game One.rom"),
-                image: Some(PathBuf::from("test_directory/Imgs/Game One.png")),
-                core: None,
-                rating: None,
-                release_date: None,
-                developer: None,
-                publisher: None,
-                genres: Vec::new(),
-                favorite: false,
-            },
-            NewGame {
-                name: "Game Two".to_owned(),
-                path: PathBuf::from("test_directory/Game Two.rom"),
-                image: Some(PathBuf::from("test_directory/Imgs/Game Two.png")),
-                core: None,
-                rating: None,
-                release_date: None,
-                developer: Some("Square Enix".to_owned()),
-                publisher: Some("Nintendo".to_owned()),
-                genres: Vec::new(),
-                favorite: false,
-            },
-        ];
-
-        database.update_games(&games).unwrap();
-
-        let results = database.search("Game", 100).unwrap();
-        assert_eq!(results.len(), 2);
-
-        let results = database.search("One", 100).unwrap();
-        assert_eq!(results[0].path, games[0].path);
-
-        let results = database.search("Game One", 100).unwrap();
-        assert_eq!(results[0].path, games[0].path);
-
-        let results = database.search("Ga", 100).unwrap();
-        assert_eq!(results[0].path, games[0].path);
-
-        let results = database.search("square enix", 100).unwrap();
-        assert_eq!(results[0].path, games[1].path);
-
-        let results = database.search("nintendo", 100).unwrap();
-        assert_eq!(results[0].path, games[1].path);
     }
 
     #[test]

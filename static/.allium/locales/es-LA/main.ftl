@@ -10,7 +10,6 @@ sort-most-played = Ordenar: Tiempo de Juego
 sort-rating = Ordenar: Calificación
 sort-release-date = Ordenar: Fecha de Lanzamiento
 sort-random = Ordenar: Al azar
-sort-search = Buscar
 sort-favorites = Ordenar: Favoritos
 
 no-recent-games = Juega un juego para empezar
@@ -154,7 +153,6 @@ button-edit = Editar
 button-select = Seleccionar
 button-launch = Lanzar
 button-sort = Ordenar
-button-edit-search = Editar Búsqueda
 
 keyboard-button-backspace = Borrar
 keyboard-button-shift = Mayúsculas

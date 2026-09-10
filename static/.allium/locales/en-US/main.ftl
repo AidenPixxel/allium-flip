@@ -10,18 +10,9 @@ sort-most-played = Sort: Playtime
 sort-rating = Sort: Rating
 sort-release-date = Sort: Release Date
 sort-random = Sort: Random
-sort-search = Search
 sort-favorites = Sort: Favorites
-sort-relevance = Sort: Relevance
 
 no-recent-games = Play a game to get started
-search-games-found = 
-    { $count -> 
-        [zero] No games found
-        [one] 1 game found
-       *[other] { $count } games found
-    }
-
 populating-database = Populating database...
     This may take several minutes.
     Go grab a coffee!
@@ -227,7 +218,6 @@ button-edit = Edit
 button-select = Select
 button-launch = Launch
 button-sort = Sort
-button-edit-search = Edit Search
 button-restore-defaults = Restore Defaults
 
 keyboard-button-backspace = Backspace

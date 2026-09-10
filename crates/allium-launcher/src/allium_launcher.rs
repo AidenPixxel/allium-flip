@@ -252,14 +252,6 @@ impl AlliumLauncher<DefaultPlatform> {
                 self.display.load(self.display.bounding_box())?;
                 self.view.set_should_draw();
             }
-            Command::StartSearch => {
-                debug!("starting search");
-                self.view.start_search();
-            }
-            Command::Search(query) => {
-                debug!("searching");
-                self.view.search(query)?;
-            }
             Command::Toast(text, duration) => {
                 debug!("showing toast: {:?}", text);
                 self.toast = Some(Toast::new(text, duration));

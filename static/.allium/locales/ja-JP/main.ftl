@@ -10,7 +10,6 @@ sort-most-played = ソート：プレイ時間
 sort-rating = ソート：評価
 sort-release-date = ソート：リリース日
 sort-random = ソート：ランダム
-sort-search = 検索
 sort-favorites = ソート:お気に入り
 
 no-recent-games = ゲームをプレイして開始

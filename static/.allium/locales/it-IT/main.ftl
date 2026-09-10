@@ -10,7 +10,6 @@ sort-most-played = Ordina: Attività
 sort-rating = Ordina: Valutazione
 sort-release-date = Ordina: Data di uscita
 sort-random = Ordina: Casuale
-sort-search = Cerca
 sort-favorites = Ordina: Preferiti
 
 no-recent-games = Avvia un gioco per iniziare

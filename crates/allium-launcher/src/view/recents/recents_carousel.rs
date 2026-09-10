@@ -50,22 +50,13 @@ impl RecentsCarousel {
             ButtonHints::new(
                 res.clone(),
                 vec![],
-                vec![
-                    ButtonHint::new(
-                        res.clone(),
-                        Point::zero(),
-                        Key::A,
-                        locale.t("button-select"),
-                        Alignment::Right,
-                    ),
-                    ButtonHint::new(
-                        res.clone(),
-                        Point::zero(),
-                        Key::X,
-                        locale.t("sort-search"),
-                        Alignment::Right,
-                    ),
-                ],
+                vec![ButtonHint::new(
+                    res.clone(),
+                    Point::zero(),
+                    Key::A,
+                    locale.t("button-select"),
+                    Alignment::Right,
+                )],
             )
         };
 
@@ -287,10 +278,6 @@ impl View for RecentsCarousel {
             }
             KeyEvent::Pressed(Key::A) => {
                 self.launch_game(commands).await?;
-                Ok(true)
-            }
-            KeyEvent::Pressed(Key::X) => {
-                commands.send(Command::StartSearch).await?;
                 Ok(true)
             }
             _ => Ok(false),

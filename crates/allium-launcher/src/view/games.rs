@@ -33,20 +33,8 @@ pub struct Games {
 
 impl Games {
     pub fn new(rect: Rect, res: Resources, list: EntryList<GamesSort>) -> Result<Self> {
-        let button_hints = {
-            let locale = res.get::<Locale>();
-            ButtonHints::new(
-                res.clone(),
-                vec![ButtonHint::new(
-                    res.clone(),
-                    Point::zero(),
-                    Key::X,
-                    locale.t("sort-search"),
-                    Alignment::Left,
-                )],
-                vec![],
-            )
-        };
+        // No left hint: sorting advertises itself from the list's own hint row
+        let button_hints = ButtonHints::new(res.clone(), vec![], vec![]);
 
         Ok(Self {
             rect,
@@ -110,13 +98,7 @@ impl View for Games {
         commands: Sender<Command>,
         bubble: &mut VecDeque<Command>,
     ) -> Result<bool> {
-        match event {
-            KeyEvent::Pressed(Key::X) => {
-                commands.send(Command::StartSearch).await?;
-                return Ok(true);
-            }
-            _ => self.list.handle_key_event(event, commands, bubble).await,
-        }
+        self.list.handle_key_event(event, commands, bubble).await
     }
 
     fn children(&self) -> Vec<&dyn View> {

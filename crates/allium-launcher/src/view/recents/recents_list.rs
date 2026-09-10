@@ -34,20 +34,8 @@ impl RecentsList {
     pub fn new(rect: Rect, res: Resources, list: EntryList<RecentsSort>) -> Result<Self> {
         let styles = res.get::<Stylesheet>();
 
-        let button_hints = {
-            let locale = res.get::<Locale>();
-            ButtonHints::new(
-                res.clone(),
-                vec![ButtonHint::new(
-                    res.clone(),
-                    Point::zero(),
-                    Key::X,
-                    locale.t("sort-search"),
-                    Alignment::Left,
-                )],
-                vec![],
-            )
-        };
+        // No left hint: sorting advertises itself from the list's own hint row
+        let button_hints = ButtonHints::new(res.clone(), vec![], vec![]);
 
         drop(styles);
 
@@ -110,13 +98,7 @@ impl View for RecentsList {
         commands: Sender<Command>,
         bubble: &mut VecDeque<Command>,
     ) -> Result<bool> {
-        match event {
-            KeyEvent::Pressed(Key::X) => {
-                commands.send(Command::StartSearch).await?;
-                return Ok(true);
-            }
-            _ => self.list.handle_key_event(event, commands, bubble).await,
-        }
+        self.list.handle_key_event(event, commands, bubble).await
     }
 
     fn children(&self) -> Vec<&dyn View> {
@@ -142,7 +124,6 @@ pub enum RecentsSort {
     MostPlayed,
     Favorites,
     Random,
-    Search(String),
 }
 
 impl Sort for RecentsSort {
@@ -152,7 +133,6 @@ impl Sort for RecentsSort {
             RecentsSort::MostPlayed => locale.t("sort-most-played"),
             RecentsSort::Favorites => locale.t("sort-favorites"),
             RecentsSort::Random => locale.t("sort-random"),
-            RecentsSort::Search(_) => locale.t("sort-search"),
         }
     }
 
@@ -162,7 +142,6 @@ impl Sort for RecentsSort {
             RecentsSort::MostPlayed => RecentsSort::Favorites,
             RecentsSort::Favorites => RecentsSort::Random,
             RecentsSort::Random => RecentsSort::LastPlayed,
-            RecentsSort::Search(_) => RecentsSort::LastPlayed,
         }
     }
 
@@ -181,7 +160,6 @@ impl Sort for RecentsSort {
             RecentsSort::MostPlayed => database.select_most_played(RECENT_GAMES_LIMIT),
             RecentsSort::Favorites => database.select_favorites(RECENT_GAMES_LIMIT),
             RecentsSort::Random => database.select_random(RECENT_GAMES_LIMIT),
-            RecentsSort::Search(query) => database.search(query, RECENT_GAMES_LIMIT),
         };
 
         let games = match games {

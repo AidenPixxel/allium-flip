@@ -25,8 +25,6 @@ pub enum Command {
     TrapFocus,
     Unfocus,
     Redraw,
-    StartSearch,
-    Search(String),
     Toast(String, Option<Duration>),
     ImageToast(ImageBuffer<Rgba<u8>, Vec<u8>>, String, Option<Duration>),
     DismissToast,
