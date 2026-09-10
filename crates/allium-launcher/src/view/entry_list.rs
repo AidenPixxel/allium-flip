@@ -60,13 +60,24 @@ where
 
         let mut button_hints = {
             let locale = res.get::<Locale>();
-            let mut hints = vec![ButtonHint::new(
-                res.clone(),
-                Point::zero(),
-                Key::A,
-                locale.t("button-select"),
-                Alignment::Right,
-            )];
+            let mut hints = vec![
+                ButtonHint::new(
+                    res.clone(),
+                    Point::zero(),
+                    Key::A,
+                    locale.t("button-resume"),
+                    Alignment::Right,
+                ),
+                ButtonHint::new(
+                    res.clone(),
+                    Point::zero(),
+                    Key::X,
+                    locale.t("button-restart"),
+                    Alignment::Right,
+                ),
+            ];
+            // Sort keeps its own button. `sort()` rewrites this hint by index, so it has to stay
+            // at index 2 -- see the get_mut there.
             if S::HAS_BUTTON_HINTS {
                 hints.push(ButtonHint::new(
                     res.clone(),
@@ -76,6 +87,13 @@ where
                     Alignment::Right,
                 ));
             }
+            hints.push(ButtonHint::new(
+                res.clone(),
+                Point::zero(),
+                Key::Select,
+                locale.t("button-options"),
+                Alignment::Right,
+            ));
             ButtonHints::new(res.clone(), vec![], hints)
         };
 
@@ -168,7 +186,11 @@ where
         debug!("Selected entry: {:?}", self.entries.get(index));
     }
 
-    async fn select_entry(&mut self, commands: Sender<Command>) -> Result<()> {
+    /// `restart` starts a game from the beginning rather than resuming its auto save state.
+    /// It is the flag the in-game menu's Reset entry already uses, so this is a new binding on
+    /// proven plumbing -- and note it does nothing for cores launched by path rather than through
+    /// RetroArch (DraStic, ffplay, native), which ignore it.
+    async fn select_entry(&mut self, commands: Sender<Command>, restart: bool) -> Result<()> {
         if let Some(entry) = self.entries.get_mut(self.list.selected()) {
             match entry {
                 Entry::Directory(dir) => {
@@ -183,7 +205,7 @@ where
                     let command = self.res.get::<ConsoleMapper>().launch_game(
                         &self.res.get(),
                         game,
-                        false,
+                        restart,
                     )?;
                     if let Some(cmd) = command {
                         commands.send(cmd).await?;
@@ -203,7 +225,7 @@ where
         if S::HAS_BUTTON_HINTS {
             self.button_hints
                 .right_mut()
-                .get_mut(1)
+                .get_mut(2)
                 .unwrap()
                 .set_text(self.sort.button_hint(&self.res.get::<Locale>()));
             self.button_hints.set_should_draw();
@@ -497,7 +519,7 @@ where
                                 game.core = Some(core.to_string());
                             }
                             self.core = None;
-                            self.select_entry(commands).await?;
+                            self.select_entry(commands, false).await?;
                         }
                         MenuEntry::Reset => {
                             let entry = self.entries.get_mut(self.list.selected()).unwrap();
@@ -601,7 +623,11 @@ where
                     Ok(true)
                 }
                 KeyEvent::Pressed(Key::A) => {
-                    self.select_entry(commands).await?;
+                    self.select_entry(commands, false).await?;
+                    Ok(true)
+                }
+                KeyEvent::Pressed(Key::X) => {
+                    self.select_entry(commands, true).await?;
                     Ok(true)
                 }
                 KeyEvent::Pressed(Key::Y) => {
