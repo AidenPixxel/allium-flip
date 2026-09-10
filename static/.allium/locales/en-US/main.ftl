@@ -195,6 +195,11 @@ ingame-menu-slot = Slot { $slot }
 ingame-menu-slot-auto = Auto
 ingame-menu-disk = Disk { $disk }
 
+# The in-game indicator, drawn by RetroArch in its bitmap font: ASCII only, one line.
+osd-volume = Volume
+osd-brightness = Brightness
+osd-display = Display
+
 guide-button-search = Search
 guide-button-next = Next
 guide-button-prev = Prev
