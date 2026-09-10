@@ -89,6 +89,20 @@ pub const MAX_VOLUME: i32 = 20;
 /// Brightness scale is 0..=MAX_BRIGHTNESS percent.
 pub const MAX_BRIGHTNESS: u8 = 100;
 
+/// The warmth slider cuts green and blue and leaves red alone, so the panel goes amber for playing
+/// in the dark. These are the channel scales at warmth 100; tune them here.
+///
+/// Deep enough to read as candlelight rather than merely "less blue": from a neutral profile they
+/// land on roughly 1800-2000K. Dimming is not among them -- that is the backlight's job, and a
+/// profile carries its own brightness for it.
+pub const WARMTH_GREEN_SCALE: f32 = 0.55;
+pub const WARMTH_BLUE_SCALE: f32 = 0.10;
+/// The platform resets all three channels to neutral grey when *every* one of them falls below
+/// this, which would cancel the tint outright. Only reachable from a profile whose base red is
+/// itself this low, so `DisplayProfile::effective` lifts the whole set to clear it rather than
+/// clamping each channel -- clamping would cap how warm an ordinary profile can go.
+pub const PANEL_FLATTEN_THRESHOLD: u8 = 15;
+
 /// After the battery level drops below this threshold, the charging LED will blink at 0.5Hz.
 pub const BATTERY_WARNING_THRESHOLD: i32 = 15;
 /// After the battery level drops below this threshold, the device will shut down.

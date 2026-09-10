@@ -1,22 +1,39 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use common::constants::UI_FRAME_INTERVAL;
-use common::display::{Display, RectHold, draw_speaker_icon, draw_sun_icon, fill_rounded_rect};
-use common::geom::Rect;
+use common::display::font::FontTextStyleBuilder;
+use common::display::{
+    Display, RectHold, draw_moon_icon, draw_speaker_icon, draw_sun_icon, fill_rounded_rect,
+};
+use common::geom::{Point, Rect};
 use common::platform::Platform;
 use common::stylesheet::Stylesheet;
 use tokio::time::Instant;
 
 /// How long the indicator stays on screen after the last change
 const HIDE_TIMEOUT: Duration = Duration::from_millis(1000);
-/// Twice per UI frame, since a launcher redraw flushes the whole screen
-const UI_REDRAW_PERIOD: Duration = Duration::from_micros(UI_FRAME_INTERVAL.as_micros() as u64 / 2);
+/// How often the plate is re-flushed when nothing else repaints it. A launcher redraw flushes the
+/// whole screen and wipes the plate, so this is how long it can stay missing; keep it near one
+/// display frame. Deriving it from UI_FRAME_INTERVAL would give 83ms -- half a *launcher* frame at
+/// 6fps -- which leaves the plate dark for five display frames at a time.
+const UI_REDRAW_PERIOD: Duration = Duration::from_millis(16);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OsdKind {
     Volume,
     Brightness,
+    DisplayProfile,
+}
+
+/// What fills the plate beside the icon.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OsdContent {
+    /// A level, drawn as a filled bar
+    Bar(f32),
+    /// A name, drawn as text. Occupies the bar's slot, so the plate stays the same size however
+    /// long the text is -- `Surface` snapshots one fixed rect and restores it, and a plate that
+    /// resized would leave the difference behind.
+    Label(String),
 }
 
 /// The plate and its contents, placed from the framebuffer size and the theme
@@ -42,13 +59,14 @@ impl Plate {
         let plate_w = padding_x + icon_side + padding_x + bar_w + padding_x;
         let plate_h = font_size + padding_y * 2;
 
-        // Clear the button hint row, positioned by ButtonHints::ensure_layout
-        let hint_h = styles.button_size().max(styles.button_hint_font_size()) as u32;
-        let bottom_margin = padding_x + hint_h + padding_y;
-
+        // Centred vertically, and that placement is load-bearing rather than cosmetic. The panel
+        // is mounted upside down -- `fb_y = height - 1 - y` in the framebuffer -- so the bottom of
+        // the logical screen is the *first* thing scanned out each frame. A plate down there has
+        // only ~1.7ms after a game overwrites it before the panel reads it, which is not enough to
+        // reliably repaint. The middle of the screen is scanned ~8.4ms in.
         let rect = Rect::new(
             (display.width() as i32 - plate_w as i32) / 2,
-            display.height() as i32 - (plate_h + bottom_margin) as i32,
+            (display.height() as i32 - plate_h as i32) / 2,
             plate_w,
             plate_h,
         );
@@ -110,7 +128,17 @@ impl<P: Platform> Surface<P> {
         self.display.flush_rect(self.plate.rect)
     }
 
-    fn draw(&mut self, styles: &Stylesheet, kind: OsdKind, fraction: f32) -> Result<()> {
+    /// Paints the plate into the pixmap. `flush` writes the whole rect to the framebuffer, which
+    /// is right when nothing else repaints it -- but wrong under a stamper: the stamp deliberately
+    /// trims the rounded corners so the app's own pixels show through them, whereas a full flush
+    /// would push the frozen frame snapshotted at creation into those corners on every change.
+    fn draw(
+        &mut self,
+        styles: &Stylesheet,
+        kind: OsdKind,
+        content: &OsdContent,
+        flush: bool,
+    ) -> Result<()> {
         let Plate {
             rect,
             icon,
@@ -136,27 +164,52 @@ impl<P: Platform> Surface<P> {
             OsdKind::Brightness => {
                 draw_sun_icon(&mut self.display.pixmap_mut(), icon, styles.ui.text_color)
             }
+            OsdKind::DisplayProfile => {
+                draw_moon_icon(&mut self.display.pixmap_mut(), icon, styles.ui.text_color)
+            }
         }
 
-        let bar_radius = bar.h / 2;
-        fill_rounded_rect(
-            &mut self.display.pixmap_mut(),
-            bar,
-            bar_radius,
-            styles.ui.disabled_color,
-        );
-        let fill_w = (bar.w as f32 * fraction.clamp(0.0, 1.0)).round() as u32;
-        if fill_w > 0 {
-            let fill = Rect::new(bar.x, bar.y, fill_w, bar.h);
-            fill_rounded_rect(
-                &mut self.display.pixmap_mut(),
-                fill,
-                bar_radius.min(fill_w / 2),
-                styles.ui.highlight_color,
-            );
+        match content {
+            OsdContent::Bar(fraction) => {
+                let bar_radius = bar.h / 2;
+                fill_rounded_rect(
+                    &mut self.display.pixmap_mut(),
+                    bar,
+                    bar_radius,
+                    styles.ui.disabled_color,
+                );
+                let fill_w = (bar.w as f32 * fraction.clamp(0.0, 1.0)).round() as u32;
+                if fill_w > 0 {
+                    let fill = Rect::new(bar.x, bar.y, fill_w, bar.h);
+                    fill_rounded_rect(
+                        &mut self.display.pixmap_mut(),
+                        fill,
+                        bar_radius.min(fill_w / 2),
+                        styles.ui.highlight_color,
+                    );
+                }
+            }
+            OsdContent::Label(label) => {
+                let text = FontTextStyleBuilder::new(styles.ui.ui_font.font())
+                    .font_fallback(styles.cjk_font.font())
+                    .font_size(styles.ui.ui_font.size)
+                    .text_color(styles.ui.text_color)
+                    .build();
+                // Centred in the bar's slot, and clipped by it: the plate is a fixed size, so a
+                // name wider than the slot must be cut rather than overflow the background
+                let measured = text.measure(label).w.min(bar.w);
+                let pos = Point::new(
+                    bar.x + (bar.w as i32 - measured as i32) / 2,
+                    rect.y + (rect.h as i32 - styles.ui.ui_font.size as i32) / 2,
+                );
+                text.draw(&mut self.display.pixmap_mut(), label, pos);
+            }
         }
 
-        self.display.flush_rect(rect)
+        if flush {
+            self.display.flush_rect(rect)?;
+        }
+        Ok(())
     }
 }
 
@@ -193,18 +246,39 @@ impl<P: Platform> Osd<P> {
         &mut self,
         platform: &mut P,
         kind: OsdKind,
-        fraction: f32,
+        content: OsdContent,
         repainting: bool,
     ) -> Result<()> {
+        let now = Instant::now();
+
+        // Redraw the plate that is already up rather than rebuilding it: rebuilding stops the
+        // stamper, spawns a thread and re-mmaps fb0 -- and leaves the rect undefended in
+        // between, which is what made the bar flicker while a key autorepeats ~30 times a second.
+        //
+        // Only the unstamped case. Swapping a running stamper's pixels would need a shared buffer
+        // the display trait does not offer, so a repainting app falls through and rebuilds -- that
+        // is Allium's own apps, which repaint on input rather than continuously. In a game the
+        // indicator is RetroArch's own message and never reaches here at all.
+        if let Some(shown) = self.shown.as_mut()
+            && !repainting
+            && matches!(shown.refresh, Refresh::Periodic { .. })
+        {
+            shown.surface.draw(&self.styles, kind, &content, true)?;
+            shown.hide_at = now + HIDE_TIMEOUT;
+            if let Refresh::Periodic { next_redraw } = &mut shown.refresh {
+                *next_redraw = now + UI_REDRAW_PERIOD;
+            }
+            return Ok(());
+        }
+
         // Consuming the old state stops its stamper before the new content is drawn
         let mut surface = match self.shown.take() {
             Some(shown) => shown.surface,
             None => Surface::new(platform, &self.styles)?,
         };
 
-        surface.draw(&self.styles, kind, fraction)?;
+        surface.draw(&self.styles, kind, &content, !repainting)?;
 
-        let now = Instant::now();
         let periodic = Refresh::Periodic {
             next_redraw: now + UI_REDRAW_PERIOD,
         };
@@ -213,8 +287,11 @@ impl<P: Platform> Osd<P> {
             refresh: if repainting {
                 match surface.hold_plate()? {
                     Some(hold) => Refresh::Continuous(hold),
-                    // Nothing stamps here, so fall back to the static-UI cadence
-                    None => periodic,
+                    None => {
+                        // No stamper after all, so nothing has put the plate on screen yet
+                        surface.flush_plate()?;
+                        periodic
+                    }
                 }
             } else {
                 periodic

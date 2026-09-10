@@ -30,7 +30,7 @@ use common::database::Database;
 use common::game_info::GameInfo;
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
 
-use crate::osd::{Osd, OsdKind};
+use crate::osd::{Osd, OsdContent, OsdKind};
 
 #[cfg(unix)]
 use {
@@ -255,11 +255,16 @@ impl AlliumD<DefaultPlatform> {
         info!("setting volume: {}", state.volume);
         platform.set_volume(state.volume)?;
 
+        info!("loading display settings");
+        // The active profile owns the backlight as well as the panel values, so it -- not the
+        // stored slider position -- is what the device comes up at. `effective` folds the
+        // profile's warmth in without baking it into the stored values, so it survives a reboot.
+        let profile = DisplaySettings::load()?.active().clone();
+        state.brightness = profile.brightness;
+
         info!("setting brightness: {}", state.brightness);
         platform.set_brightness(state.brightness)?;
-
-        info!("loading display settings");
-        platform.set_display_settings(&mut DisplaySettings::load()?)?;
+        platform.set_display_settings(&mut profile.effective())?;
 
         let main = respawn_main().await;
         let locale = Locale::new(&LocaleSettings::load()?.lang);
@@ -468,6 +473,9 @@ impl AlliumD<DefaultPlatform> {
                 }
                 KeyEvent::Pressed(Key::Right) | KeyEvent::Autorepeat(Key::Right) => {
                     self.add_volume(1)?;
+                }
+                KeyEvent::Pressed(Key::Select) => {
+                    self.rotate_display_profile()?;
                 }
                 KeyEvent::Released(Key::Power) => {
                     let game_info = GameInfo::load()?;
@@ -773,13 +781,40 @@ impl AlliumD<DefaultPlatform> {
         Ok(())
     }
 
+    /// Advances to the next display profile and puts it into effect.
+    fn rotate_display_profile(&mut self) -> Result<()> {
+        let mut settings = DisplaySettings::load()?;
+        let active = settings.rotate();
+        let name = settings.name_of(active);
+        info!("display profile: {} ({})", active + 1, name);
+
+        // Draw first, matching add_volume/add_brightness
+        self.show_osd_label(OsdKind::DisplayProfile, name);
+
+        // The backlight comes with the profile: switching to Night dims the lamp, and switching
+        // back to Day puts it where Day says it should be. Whatever Menu+Up/Down had it at is
+        // deliberately overridden -- that hotkey is a nudge, the profile is the baseline.
+        let profile = settings.active().clone();
+        self.state.brightness = profile.brightness;
+        self.platform.set_brightness(profile.brightness)?;
+        self.platform
+            .set_display_settings(&mut profile.effective())?;
+        settings.save()?;
+        Ok(())
+    }
+
     fn show_osd(&mut self, kind: OsdKind, fraction: f32) {
+        self.show_osd_content(kind, OsdContent::Bar(fraction));
+    }
+
+    fn show_osd_label(&mut self, kind: OsdKind, label: String) {
+        self.show_osd_content(kind, OsdContent::Label(label));
+    }
+
+    fn show_osd_content(&mut self, kind: OsdKind, content: OsdContent) {
         let repainting = self.foreground_repaints() && !self.menu_open;
         // Cosmetic only: a failed overlay must not take down the daemon
-        if let Err(e) = self
-            .osd
-            .show(&mut self.platform, kind, fraction, repainting)
-        {
+        if let Err(e) = self.osd.show(&mut self.platform, kind, content, repainting) {
             error!("failed to show OSD: {}", e);
         }
     }

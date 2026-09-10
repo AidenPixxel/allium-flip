@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use log::warn;
 
 use crate::battery::Battery;
-use crate::display::settings::DisplaySettings;
+use crate::display::settings::DisplayProfile;
 use crate::platform::KeyEvent;
 use crate::platform::Platform;
 use crate::platform::miyoo::evdev::EvdevKeys;
@@ -137,7 +137,7 @@ impl Platform for MiyooPlatform {
         screen::set_brightness(brightness)
     }
 
-    fn set_display_settings(&mut self, settings: &mut DisplaySettings) -> Result<()> {
+    fn set_display_settings(&mut self, settings: &mut DisplayProfile) -> Result<()> {
         if settings.contrast < 10 {
             settings.contrast = 10;
         }

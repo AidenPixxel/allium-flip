@@ -343,7 +343,7 @@ impl View for SettingsList {
                         self.dirty = true;
                         false
                     }
-                    Command::ValueChanged(i, _) => {
+                    Command::ValueChanged(i, _) | Command::ValuePreview(i, _) => {
                         *i = self.selected;
                         true
                     }
@@ -393,7 +393,7 @@ impl View for SettingsList {
                                 self.dirty = true;
                                 false
                             }
-                            Command::ValueChanged(i, _) => {
+                            Command::ValueChanged(i, _) | Command::ValuePreview(i, _) => {
                                 *i = self.selected;
                                 true
                             }

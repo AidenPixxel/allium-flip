@@ -62,6 +62,10 @@ settings-display-red = Red
 settings-display-green = Green
 settings-display-blue = Blue
 settings-display-screen-resolution = Screen Resolution
+settings-display-profile = Profile
+settings-display-profile-name = Profile Name
+settings-display-warmth = Warmth
+settings-display-brightness = Brightness
 
 settings-theme = Theme
 settings-theme-theme = Theme

@@ -5,7 +5,7 @@ use tiny_skia::{Pixmap, PixmapMut, PixmapRef};
 use crate::battery::Battery;
 use crate::display::Display;
 use crate::display::color::Color;
-use crate::display::settings::DisplaySettings;
+use crate::display::settings::DisplayProfile;
 use crate::geom::Rect;
 use crate::platform::{KeyEvent, Platform};
 
@@ -60,7 +60,7 @@ impl Platform for MockPlatform {
         Ok(())
     }
 
-    fn set_display_settings(&mut self, _settings: &mut DisplaySettings) -> Result<()> {
+    fn set_display_settings(&mut self, _settings: &mut DisplayProfile) -> Result<()> {
         Ok(())
     }
 

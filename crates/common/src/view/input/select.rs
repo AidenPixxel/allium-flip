@@ -82,12 +82,14 @@ impl View for Select {
                 | KeyEvent::Autorepeat(Key::Up | Key::Left) => {
                     *value = (*value as isize - 1).rem_euclid(self.values.len() as isize) as usize;
                     self.label.set_text(self.values[*value].clone());
+                    bubble.push_back(Command::ValuePreview(0, Value::Int(*value as i32)));
                     return Ok(true);
                 }
                 KeyEvent::Pressed(Key::Down | Key::Right)
                 | KeyEvent::Autorepeat(Key::Down | Key::Right) => {
                     *value = (*value + 1).rem_euclid(self.values.len());
                     self.label.set_text(self.values[*value].clone());
+                    bubble.push_back(Command::ValuePreview(0, Value::Int(*value as i32)));
                     return Ok(true);
                 }
                 KeyEvent::Pressed(Key::A) => {
@@ -100,6 +102,8 @@ impl View for Select {
                 KeyEvent::Pressed(Key::B) => {
                     self.edit_state = None;
                     self.label.set_text(self.values[self.value].clone());
+                    // Cancelling must undo any preview the caller acted on
+                    bubble.push_back(Command::ValuePreview(0, Value::Int(self.value as i32)));
                     bubble.push_back(Command::Unfocus);
                     Ok(true)
                 }

@@ -13,9 +13,15 @@ pub enum Command {
     Exec(std::process::Command),
     ReloadStylesheet(Box<Stylesheet>, bool),
     SaveDisplaySettings(Box<DisplaySettings>),
+    /// Apply the active profile to the panel without writing to disk, so a slider can preview
+    /// live without an SD-card write per keypress
+    ApplyDisplaySettings(Box<DisplaySettings>),
     SaveLocaleSettings(LocaleSettings),
     CloseView,
     ValueChanged(usize, Value),
+    /// An in-progress value, emitted while a widget is still being edited. Screens that want a
+    /// live preview act on it; the rest ignore it and act only on `ValueChanged`.
+    ValuePreview(usize, Value),
     TrapFocus,
     Unfocus,
     Redraw,

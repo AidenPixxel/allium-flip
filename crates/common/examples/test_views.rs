@@ -9,7 +9,7 @@
 
 use anyhow::Result;
 use common::display::color::Color;
-use common::display::{Display, fill_rect};
+use common::display::{Display, draw_moon_icon, draw_speaker_icon, draw_sun_icon, fill_rect};
 use common::geom::{Alignment, Point, Rect};
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
 use common::stylesheet::Stylesheet;
@@ -112,7 +112,30 @@ async fn main() -> Result<()> {
     let mut row: Row<Label<&str>> = Row::new(Point::new(300, 300), row_labels, Alignment::Left, 20);
     row.draw(&mut display, &styles)?;
 
-    // === Test 5: Focused/Blurred labels ===
+    // === Test 5: OSD indicator icons ===
+    // The volume/brightness/night mode overlay draws these straight onto the pixmap, so there is
+    // no View to exercise them.
+    let mut icon_label = Label::new(Point::new(300, 400), "OSD icons:", Alignment::Left, None);
+    icon_label.draw(&mut display, &styles)?;
+
+    let text_color = styles.ui.text_color;
+    draw_speaker_icon(
+        &mut display.pixmap_mut(),
+        Rect::new(300, 425, 28, 28),
+        text_color,
+    );
+    draw_sun_icon(
+        &mut display.pixmap_mut(),
+        Rect::new(340, 425, 28, 28),
+        text_color,
+    );
+    draw_moon_icon(
+        &mut display.pixmap_mut(),
+        Rect::new(380, 425, 28, 28),
+        text_color,
+    );
+
+    // === Test 6: Focused/Blurred labels ===
     let mut normal_label = Label::new(Point::new(20, 420), "Normal", Alignment::Left, None);
     normal_label.draw(&mut display, &styles)?;
 
