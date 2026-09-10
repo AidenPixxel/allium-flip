@@ -109,6 +109,10 @@ impl FramebufferDisplay {
         let width = self.width() as usize;
         let height = self.height() as usize;
         let bytes_per_pixel = (self.iface.var_screen_info.bits_per_pixel / 8) as usize;
+        // The driver's own row stride, which is not always `width * bytes_per_pixel`: a panel
+        // whose lines are padded reports a longer one, and assuming the short value walks every
+        // row further off the start of the line than the last.
+        let stride = self.iface.fix_screen_info.line_length as usize;
 
         // Trim to the rounding so the corners keep the app's pixels, not a frozen frame
         let radius = (corner_radius as usize)
@@ -134,7 +138,7 @@ impl FramebufferDisplay {
             let fb_y = height - 1 - y;
             let fb_x0 = width - rx1;
             rows.push(StampRow {
-                offset: (fb_y * width + fb_x0) * bytes_per_pixel,
+                offset: fb_y * stride + fb_x0 * bytes_per_pixel,
                 start,
                 len: bytes.len() - start,
             });
@@ -159,7 +163,7 @@ impl FramebufferDisplay {
             bytes: bytes.into_boxed_slice(),
             rows: rows.into_boxed_slice(),
             pages,
-            page_stride: width * height * bytes_per_pixel,
+            page_stride: stride * height,
         })
     }
 

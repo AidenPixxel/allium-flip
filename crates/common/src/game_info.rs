@@ -133,7 +133,6 @@ impl GameInfo {
     pub fn needs_swap(&self) -> bool {
         self.needs_swap
     }
-
 }
 
 #[cfg(test)]
