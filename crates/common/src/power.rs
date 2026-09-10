@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use strum::FromRepr;
 
 use crate::constants::ALLIUM_POWER_SETTINGS;
-use crate::performance::PerformanceMode;
 use crate::state_file;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,9 +15,6 @@ pub struct PowerSettings {
     pub volume_on_startup: VolumeOnStartup,
     #[serde(default)]
     pub charging_boot_action: ChargingBootAction,
-    /// The performance mode used by games that have not been given one of their own.
-    #[serde(default)]
-    pub performance_mode: PerformanceMode,
     /// How long the device stays suspended before powering off. Zero never powers off.
     ///
     /// A named default rather than `#[serde(default)]`, which would yield zero: every existing
@@ -78,9 +74,6 @@ impl Default for PowerSettings {
             auto_sleep_duration_minutes: 5,
             volume_on_startup: VolumeOnStartup::Restore,
             charging_boot_action: ChargingBootAction::ChargeScreen,
-            // Leaves the CPU governor exactly as it was, so this build changes nothing about how
-            // the device clocks until the setting is actually used
-            performance_mode: PerformanceMode::System,
             suspend_shutdown_minutes: PowerSettings::default_suspend_shutdown_minutes(),
         }
     }
@@ -110,9 +103,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn older_power_files_still_parse() {
+    fn power_files_from_other_builds_still_parse() {
         // A parse failure resets every power setting to its default (and used to delete the file
-        // outright), so a file written before `charging_boot_action` existed must still deserialize.
+        // outright), so both directions have to keep deserializing: a file from before a field
+        // existed, and one carrying a field that has since been removed.
         let legacy = r#"{
             "power_button_action": "Suspend",
             "lid_close_action": "Shutdown",
@@ -127,11 +121,23 @@ mod tests {
             parsed.charging_boot_action,
             ChargingBootAction::ChargeScreen
         );
-        // Nothing touches the CPU governor until this is set deliberately
-        assert_eq!(parsed.performance_mode, PerformanceMode::System);
         // Five, not zero: zero means Never, which would quietly take away the shutdown that this
         // file's device has been doing after five minutes all along
         assert_eq!(parsed.suspend_shutdown_minutes, 5);
+
+        // Written while the CPU speed setting existed. The key is now unknown, and it must be
+        // ignored rather than rejected -- a rejection here resets the power button, the lid and
+        // the charging behaviour along with it.
+        let with_performance_mode = legacy.replace(
+            r#""auto_sleep_duration_minutes": 15"#,
+            r#""auto_sleep_duration_minutes": 15, "performance_mode": "Max""#,
+        );
+        let parsed: PowerSettings = serde_json::from_str(&with_performance_mode).unwrap();
+        assert_eq!(parsed.auto_sleep_duration_minutes, 15);
+        assert!(matches!(
+            parsed.power_button_action,
+            PowerButtonAction::Suspend
+        ));
     }
 
     #[test]

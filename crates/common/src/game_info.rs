@@ -10,7 +10,6 @@ use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{ALLIUM_GAME_INFO, ALLIUM_GAMES_DIR, ALLIUM_SCRIPTS_DIR};
-use crate::performance::PerformanceMode;
 use crate::state_file;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,13 +31,6 @@ pub struct GameInfo {
     pub needs_swap: bool,
     /// The CPU governor preset to run this game at, already resolved against the global default.
     ///
-    /// Carried here rather than re-read from the database because alliumd rebuilds the child from
-    /// this file alone when resuming, and opening SQLite on that path would cost time on a launch
-    /// that is already the slow part. `serde(default)` is load-bearing: without it, a state file
-    /// written by an older build fails to parse and `load` sets it aside, dropping the game in
-    /// progress on the first boot after an update.
-    #[serde(default)]
-    pub performance_mode: PerformanceMode,
     /// Path to the image.
     pub image: Option<PathBuf>,
     /// Paths to the guide text files.
@@ -57,7 +49,6 @@ impl Default for GameInfo {
             args: Vec::new(),
             has_menu: false,
             needs_swap: false,
-            performance_mode: PerformanceMode::default(),
             image: None,
             guides: Vec::new(),
             start_time: Utc::now(),
@@ -87,9 +78,6 @@ impl GameInfo {
             command,
             args,
             has_menu,
-            // `new` already takes eight positional arguments; the caller assigns this straight
-            // after, once it has resolved the game's mode against the global default.
-            performance_mode: PerformanceMode::default(),
             needs_swap,
             image,
             guides,
@@ -147,26 +135,6 @@ impl GameInfo {
     pub fn needs_swap(&self) -> bool {
         self.needs_swap
     }
-
-    /// Records a new performance mode for the game currently running.
-    ///
-    /// Deliberately does not round-trip through [`GameInfo::load`], which spawns `swap-on.sh` and
-    /// sets the state file aside on a parse failure -- neither is wanted from the in-game menu with
-    /// a game running. Without this, changing the mode mid-game would be undone by the next
-    /// resume, which re-applies whatever was resolved at launch.
-    pub fn store_performance_mode(mode: PerformanceMode) -> Result<()> {
-        let Ok(file) = File::open(ALLIUM_GAME_INFO.as_path()) else {
-            debug!("no game info to update, not saving the performance mode");
-            return Ok(());
-        };
-        let Ok(mut game_info) = serde_json::from_reader::<_, Self>(file) else {
-            warn!("could not read game info, not saving the performance mode");
-            return Ok(());
-        };
-
-        game_info.performance_mode = mode;
-        game_info.save()
-    }
 }
 
 #[cfg(test)]
@@ -174,10 +142,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn older_state_files_still_parse() {
+    fn state_files_from_other_builds_still_parse() {
         // A parse failure loses the game in progress on the first boot after an update (and used
-        // to delete the state file too). A file written before `performance_mode` existed has to
-        // keep deserializing.
+        // to delete the state file too), so both directions have to keep deserializing: a file
+        // from before a field existed, and one carrying a field that has since been removed.
         let legacy = r#"{
             "name": "Game One",
             "path": "Roms/GBA/Game One.gba",
@@ -193,7 +161,15 @@ mod tests {
 
         let game_info: GameInfo = serde_json::from_str(legacy).unwrap();
         assert_eq!(game_info.name, "Game One");
-        assert_eq!(game_info.performance_mode, PerformanceMode::System);
+
+        // Written while per-game CPU speed existed. The key is now unknown and must be ignored
+        // rather than rejected -- serde does that by default, and nothing here opts out of it.
+        let with_performance_mode = legacy.replace(
+            r#""needs_swap": false,"#,
+            r#""needs_swap": false, "performance_mode": "Max","#,
+        );
+        let game_info: GameInfo = serde_json::from_str(&with_performance_mode).unwrap();
+        assert_eq!(game_info.name, "Game One");
     }
 }
 

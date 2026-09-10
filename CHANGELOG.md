@@ -5,6 +5,24 @@ by what changed rather than by run number; the commit log has the detail.
 
 ## Unreleased
 
+### Removed
+- **Per-game CPU speed and the Settings → Power performance mode.** The tiers were sold on battery
+  life, and that does not hold up: for a fixed amount of work, dynamic CPU energy goes as voltage
+  squared and is *independent of frequency*, so capping the clock on a frame-limited emulator moves
+  time from idle to busy inside each frame and lands on roughly the same total. Real savings need
+  per-frequency voltage scaling, and nothing about this SoC says it does that. Meanwhile **High**,
+  described as "speeds up to full when a game needs it", was untuned `ondemand` — which lags a
+  sampling period behind a heavy scene, and on a kernel that boots with `performance` was slower
+  than leaving the CPU alone.
+
+  The CPU is now left exactly as the kernel boots it, which is what `System` — the default, and so
+  almost every device — already did. **If you had picked a mode, games may run faster after this
+  update.** Nothing resets: an old `power.json` or save-state file carrying the setting still loads,
+  the key is simply ignored.
+
+  Video playback still pins the governor while it needs it, but now puts it back itself on every
+  exit path, including being quit mid-video — previously that cleanup lived in the daemon.
+
 ### Fixed
 - The in-game volume and brightness indicator no longer flickers over RetroArch. It is now handed to
   RetroArch as a `SHOW_MSG`, which RetroArch draws inside the frame it presents; stamping the same

@@ -8,7 +8,6 @@ use common::command::{Command, Value};
 use common::display::Display as DisplayTrait;
 use common::geom::{Alignment, Point, Rect};
 use common::locale::Locale;
-use common::performance::{self, DISPLAY_ORDER, PerformanceMode};
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
 use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
 use common::resources::Resources;
@@ -35,44 +34,8 @@ pub struct Power {
     button_hints: ButtonHints<String>,
 }
 
-/// Locale key naming a performance preset.
-fn performance_mode_key(mode: PerformanceMode) -> &'static str {
-    match mode {
-        PerformanceMode::System => "settings-power-performance-mode-system",
-        PerformanceMode::Powersave => "settings-power-performance-mode-powersave",
-        PerformanceMode::Low => "settings-power-performance-mode-low",
-        PerformanceMode::Medium => "settings-power-performance-mode-medium",
-        PerformanceMode::High => "settings-power-performance-mode-high",
-        PerformanceMode::Max => "settings-power-performance-mode-max",
-    }
-}
-
-/// The preset's name, carrying the frequency it resolves to on this device where there is one
-/// worth showing.
-///
-/// Composed through a locale key rather than `format!` so the wording stays with the translators,
-/// and kept short -- `Select` builds its label with no width limit
-/// (`view::input::select::Select::new`) while the row title beside it is truncated at two thirds
-/// of the row, so a long value here runs into the title.
-fn performance_mode_label(mode: PerformanceMode, locale: &Locale) -> String {
-    let name = locale.t(performance_mode_key(mode));
-    match performance::ceiling_mhz(mode) {
-        Some(mhz) => {
-            let mut args = HashMap::new();
-            args.insert("name".into(), name.into());
-            args.insert("mhz".into(), (mhz as i32).into());
-            locale.ta("settings-power-performance-mode-capped", &args)
-        }
-        None => name,
-    }
-}
-
 /// Describes the highlighted row's current option.
 fn description_text(row: usize, settings: &PowerSettings, locale: &Locale) -> String {
-    if row == ROW_PERFORMANCE {
-        return performance_description(settings.performance_mode, locale);
-    }
-
     if row == ROW_SUSPEND_SHUTDOWN {
         return minutes_description(
             "settings-power-desc-shutdown-after",
@@ -111,35 +74,8 @@ fn minutes_description(key: &str, minutes: i32, locale: &Locale) -> String {
     locale.ta(key, &args)
 }
 
-/// The capped tiers name the frequency they stop at, which is only known once the driver has been
-/// read, so they take an argument -- and need a wording of their own for a device that publishes
-/// no frequencies, since Fluent would otherwise render the placeholder name.
-fn performance_description(mode: PerformanceMode, locale: &Locale) -> String {
-    let key = match mode {
-        PerformanceMode::System => "settings-power-desc-performance-system",
-        PerformanceMode::Powersave => "settings-power-desc-performance-powersave",
-        PerformanceMode::Low => "settings-power-desc-performance-low",
-        PerformanceMode::Medium => "settings-power-desc-performance-medium",
-        PerformanceMode::High => "settings-power-desc-performance-high",
-        PerformanceMode::Max => "settings-power-desc-performance-max",
-    };
-
-    match mode {
-        PerformanceMode::Low | PerformanceMode::Medium => match performance::ceiling_mhz(mode) {
-            Some(mhz) => {
-                let mut args = HashMap::new();
-                args.insert("mhz".into(), (mhz as i32).into());
-                locale.ta(key, &args)
-            }
-            None => locale.t(&format!("{key}-unknown")),
-        },
-        _ => locale.t(key),
-    }
-}
-
 /// Locale key describing the option currently chosen for `row`, or `None` for rows whose label
-/// already says everything. The performance row is handled by [`performance_description`], which
-/// needs an argument this signature cannot carry.
+/// already says everything.
 fn description_key(row: usize, settings: &PowerSettings) -> Option<&'static str> {
     match row {
         ROW_AUTO_SLEEP_CHARGING => Some(if settings.auto_sleep_when_charging {
@@ -181,16 +117,15 @@ fn power_action(row: usize, settings: &PowerSettings) -> PowerButtonAction {
     }
 }
 
-// Performance goes first rather than last so every index stays fixed: the lid row is only built
-// on devices that have a lid, so anything appended after it would sit at a device-dependent row.
-const ROW_PERFORMANCE: usize = 0;
-const ROW_AUTO_SLEEP_CHARGING: usize = 1;
-const ROW_AUTO_SLEEP_MINUTES: usize = 2;
-const ROW_SUSPEND_SHUTDOWN: usize = 3;
-const ROW_CHARGING_BOOT: usize = 4;
-const ROW_VOLUME_ON_STARTUP: usize = 5;
-const ROW_POWER_BUTTON: usize = 6;
-const ROW_LID_CLOSE: usize = 7;
+// Lid close is last because it is the one row that is not always built -- only devices with a lid
+// get it -- so anything added after it would sit at a device-dependent index. Append above it.
+const ROW_AUTO_SLEEP_CHARGING: usize = 0;
+const ROW_AUTO_SLEEP_MINUTES: usize = 1;
+const ROW_SUSPEND_SHUTDOWN: usize = 2;
+const ROW_CHARGING_BOOT: usize = 3;
+const ROW_VOLUME_ON_STARTUP: usize = 4;
+const ROW_POWER_BUTTON: usize = 5;
+const ROW_LID_CLOSE: usize = 6;
 
 /// Powering off is hidden where `shutdown` can only reboot, which would make plugging in a
 /// charger loop the device through boot forever.
@@ -264,24 +199,6 @@ impl Power {
         );
 
         let mut buttons: Vec<(String, Box<dyn View>)> = vec![
-            (
-                locale.t("settings-power-performance-mode"),
-                Box::new(Select::new(
-                    Point::zero(),
-                    // Indexed through DISPLAY_ORDER rather than the discriminant: the presets are
-                    // stored on disk by discriminant and so can only be appended to, which is not
-                    // the order they should be walked in.
-                    DISPLAY_ORDER
-                        .iter()
-                        .position(|mode| *mode == power_settings.performance_mode)
-                        .unwrap_or_default(),
-                    DISPLAY_ORDER
-                        .iter()
-                        .map(|mode| performance_mode_label(*mode, &locale))
-                        .collect(),
-                    Alignment::Right,
-                )),
-            ),
             (
                 locale.t("settings-power-auto-sleep-when-charging"),
                 Box::new(Toggle::new(
@@ -430,13 +347,6 @@ impl Power {
 impl Power {
     fn apply_value(&mut self, row: usize, val: Value) {
         match row {
-            ROW_PERFORMANCE => {
-                // Index through the display order, not the discriminant
-                self.power_settings.performance_mode = DISPLAY_ORDER
-                    .get(val.as_int().unwrap_or(0).max(0) as usize)
-                    .copied()
-                    .unwrap_or_default()
-            }
             ROW_AUTO_SLEEP_CHARGING => {
                 self.power_settings.auto_sleep_when_charging = val.as_bool().unwrap_or(true)
             }
@@ -554,11 +464,8 @@ impl View for Power {
                     Command::ValueChanged(i, val) => {
                         self.apply_value(i, val);
                         self.power_settings.save()?;
-                        // The performance default is read at each game launch, so it needs no
-                        // restart -- unlike the rows alliumd only reads once at startup.
-                        if i != ROW_PERFORMANCE {
-                            toast_needs_restart_for_effect(&self.res, &commands).await?;
-                        }
+                        // Every remaining row is read by alliumd once at startup
+                        toast_needs_restart_for_effect(&self.res, &commands).await?;
                     }
                     _ => {}
                 }

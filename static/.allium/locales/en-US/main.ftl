@@ -148,24 +148,6 @@ settings-power-charging-boot-action-power-off = Power Off
 settings-power-volume-on-startup = Volume on Startup
 settings-power-volume-on-startup-restore = Restore
 settings-power-volume-on-startup-muted = Muted
-settings-power-performance-mode = Performance Mode
-settings-power-performance-mode-system = System
-settings-power-performance-mode-powersave = Powersave
-settings-power-performance-mode-low = Low
-settings-power-performance-mode-medium = Medium
-settings-power-performance-mode-high = High
-settings-power-performance-mode-max = Max
-# Wraps a preset that caps the clock. Kept short: this sits beside the row title.
-settings-power-performance-mode-capped = { $name } ({ $mhz }MHz)
-
-settings-power-desc-performance-system = Leaves the CPU alone. Set a mode per game in the in-game menu.
-settings-power-desc-performance-powersave = Locks the CPU to its slowest speed. Too slow for GBA.
-settings-power-desc-performance-low = Speeds up only when needed, to at most { $mhz }MHz.
-settings-power-desc-performance-low-unknown = Speeds up only when needed. No speed cap on this device.
-settings-power-desc-performance-medium = Speeds up only when needed, to at most { $mhz }MHz.
-settings-power-desc-performance-medium-unknown = Speeds up only when needed. No speed cap on this device.
-settings-power-desc-performance-high = Speeds up to full when a game needs it. Usual choice.
-settings-power-desc-performance-max = Holds the CPU at full speed. Uses the most battery.
 settings-power-desc-auto-sleep-when-charging-on = Sleeps on the idle timer even while plugged in.
 settings-power-desc-auto-sleep-when-charging-off = Stays awake while plugged in.
 settings-power-desc-auto-sleep-duration = Powers off after this long with no input.
@@ -221,17 +203,6 @@ ingame-menu-quit = Quit
 ingame-menu-slot = Slot { $slot }
 ingame-menu-slot-auto = Auto
 ingame-menu-disk = Disk { $disk }
-ingame-menu-performance = Speed
-# Values for the per-game speed row. Short on purpose: the save-state thumbnail leaves this
-# list 271px wide, so the label is capped at 164px and a long value overlaps it. The full
-# names, with clock speeds, are on Settings > Power.
-ingame-menu-performance-default = Default
-ingame-menu-performance-powersave = Eco
-ingame-menu-performance-low = Low
-ingame-menu-performance-medium = Med
-ingame-menu-performance-high = High
-ingame-menu-performance-max = Max
-
 # The in-game indicator, drawn by RetroArch in its bitmap font: ASCII only, one line.
 osd-volume = Volume
 osd-brightness = Brightness

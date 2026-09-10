@@ -16,7 +16,6 @@ use common::constants::{
 };
 use common::display::settings::DisplaySettings;
 use common::locale::{Locale, LocaleSettings};
-use common::performance;
 use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
 use common::retroarch::RetroArchCommand;
 use common::state_file;
@@ -206,16 +205,11 @@ async fn spawn_main() -> Result<Child> {
             debug!("found game info, resuming game");
             game_info.start_time = Utc::now();
             game_info.save()?;
-            // The launcher does not run on this path, so nothing else would re-apply the
-            // governor after a reboot. Infallible by design: a failure here would be retried by
-            // respawn_main every five seconds, never resuming the game.
-            performance::apply(game_info.performance_mode);
             game_info.command().into()
         }
         None => {
             debug!("no game info found, launching launcher");
             use common::constants::ALLIUM_LAUNCHER;
-            performance::restore();
             Command::new(ALLIUM_LAUNCHER.as_path())
         }
     }
@@ -230,10 +224,6 @@ async fn spawn_main() -> Result<Child> {
 
 impl AlliumD<DefaultPlatform> {
     pub async fn new() -> Result<AlliumD<DefaultPlatform>> {
-        // Before anything gets the chance to change it, so returning to the launcher can put the
-        // governor back to whatever the kernel booted with
-        performance::capture();
-
         #[cfg(feature = "miyoo")]
         common::platform::miyoo::try_fix_resolution().await?;
 

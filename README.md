@@ -12,8 +12,6 @@ history is not preserved; see the original repository for it. Allium is MIT lice
 
 - **Flip only.** The core set is trimmed to the consoles actually used; the stock/Onion card layout
   is still honoured.
-- **Per-game CPU speed.** Six governor presets, set from the in-game menu's **Speed** row and applied
-  instantly; the global default is under Settings → Power.
 - **Display profiles**, replacing night mode: named presets of backlight, warmth and panel values,
   cycled with Menu + Select and applied in the display controller so they cover games too. The
   shipped **Night** profile drops the backlight and takes the panel to a deep amber.
@@ -46,8 +44,8 @@ screen, pushed over Wi-Fi from a computer, or by card.
 - Activity tracker
 - RetroArch for every core, with per-game core selection
 - Volume and brightness on Menu + L/R/U/D, with an on-screen indicator
-- Display profiles (Menu + Select) and per-game CPU speed
-- In-game menu: save and load with screenshots, Speed, Emulator (RetroArch's own menu),
+- Display profiles (Menu + Select)
+- In-game menu: save and load with screenshots, Emulator (RetroArch's own menu),
   [guides](https://github.com/goweiwen/Allium/wiki/In-game-Guide-Walkthrough-Reader), disk changer,
   reset, quit
 - Resume where you left off after a power cycle; suspend; configurable charger-wake behaviour
