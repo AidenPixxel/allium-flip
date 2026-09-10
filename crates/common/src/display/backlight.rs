@@ -6,19 +6,25 @@
 //! exactly the range a dark room lives in. One press near the old floor, 3 to 8, nearly tripled the
 //! light; the same press at the top changed it by a twentieth. These space the steps by ratio, so
 //! every press is the same multiple of the last.
+//!
+//! The bottom of the range is where the panel stops lighting, not where the duty cycle runs out:
+//! below a duty of 3 the screen goes black rather than dim, so `MIN_BRIGHTNESS` ends the slider
+//! there instead of offering settings that show nothing.
 
-/// The dimmest duty cycle the slider reaches, against the period of 800 the boot script sets.
-/// Genuinely dim, for a pitch-dark room, but still lit: suspend cuts the backlight outright
-/// through `set_backlight` rather than coming through here.
+use crate::constants::{MAX_BRIGHTNESS, MIN_BRIGHTNESS};
+
+/// Where the curve is anchored, against the period of 800 the boot script sets. Not reachable:
+/// `MIN_BRIGHTNESS` stops the slider at a duty of 3, because the panel does not light below that.
+/// The anchor stays at 1 so that every slider position keeps the duty it has always mapped to.
 const DUTY_MIN: f32 = 1.0;
 /// The brightest, unchanged from what the slider has always produced at 100.
 const DUTY_MAX: f32 = 100.0;
-/// The top of the slider's own 0..=SLIDER_MAX scale.
-const SLIDER_MAX: u8 = 100;
 
-/// The duty cycle for a slider position: 0 gives 1, 50 gives 10, 100 gives 100.
+/// The duty cycle for a slider position: `MIN_BRIGHTNESS` gives 3, 50 gives 10, 100 gives 100.
+/// Anything below the minimum is raised to it -- there is no darker setting the panel will show.
 pub fn duty_for(brightness: u8) -> u32 {
-    let t = f32::from(brightness.min(SLIDER_MAX)) / f32::from(SLIDER_MAX);
+    let brightness = brightness.clamp(MIN_BRIGHTNESS, MAX_BRIGHTNESS);
+    let t = f32::from(brightness) / f32::from(MAX_BRIGHTNESS);
     (DUTY_MIN * (DUTY_MAX / DUTY_MIN).powf(t)).round() as u32
 }
 
@@ -28,7 +34,9 @@ pub fn duty_for(brightness: u8) -> u32 {
 /// returned the raw duty, as it used to, every suspend would resume dimmer than the last.
 pub fn brightness_for(duty: u32) -> u8 {
     let duty = (duty as f32).clamp(DUTY_MIN, DUTY_MAX);
-    ((duty / DUTY_MIN).ln() / (DUTY_MAX / DUTY_MIN).ln() * f32::from(SLIDER_MAX)).round() as u8
+    let brightness =
+        ((duty / DUTY_MIN).ln() / (DUTY_MAX / DUTY_MIN).ln() * f32::from(MAX_BRIGHTNESS)).round();
+    (brightness as u8).clamp(MIN_BRIGHTNESS, MAX_BRIGHTNESS)
 }
 
 #[cfg(test)]
@@ -37,11 +45,20 @@ mod tests {
 
     #[test]
     fn the_ends_are_where_they_should_be() {
-        assert_eq!(duty_for(0), 1, "dimmest, but still lit");
+        assert_eq!(duty_for(MIN_BRIGHTNESS), 3, "dimmest the panel will light");
         assert_eq!(duty_for(100), 100, "the top of the slider is unchanged");
         assert_eq!(duty_for(50), 10);
-        // What the old linear slider's floor of 3 now corresponds to
-        assert_eq!(duty_for(20), 3);
+    }
+
+    #[test]
+    fn nothing_below_the_minimum_is_darker_than_it() {
+        // Duty 1 and 2 leave the screen black rather than dim, so there is nothing to pick
+        // between down there; the slider ends at the dimmest setting that shows anything.
+        let dimmest = duty_for(MIN_BRIGHTNESS);
+        for brightness in 0..MIN_BRIGHTNESS {
+            assert_eq!(duty_for(brightness), dimmest, "{brightness} went darker");
+        }
+        assert!(dimmest >= 3);
     }
 
     #[test]
@@ -60,7 +77,12 @@ mod tests {
     #[test]
     fn out_of_range_is_clamped_not_wrapped() {
         assert_eq!(duty_for(u8::MAX), duty_for(100));
-        assert_eq!(brightness_for(0), 0, "below the dimmest duty");
+        assert_eq!(brightness_for(0), MIN_BRIGHTNESS, "below the dimmest duty");
+        assert_eq!(
+            brightness_for(1),
+            MIN_BRIGHTNESS,
+            "a duty the panel cannot show"
+        );
         assert_eq!(brightness_for(10_000), 100, "above the brightest");
     }
 

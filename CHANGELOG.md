@@ -24,8 +24,9 @@ by what changed rather than by run number; the commit log has the detail.
   *all three* channels below 15 and so could only ever happen to a profile whose own red was that
   low; that case now lifts the whole set proportionally and keeps the tint.
 - **The brightness slider is spaced by ratio, not by difference.** Each step is the same multiple of
-  the last, and the dimmest setting is three times dimmer than before. Previously one step near the
-  bottom nearly tripled the light while one at the top changed it by a twentieth.
+  the last. Previously one step near the bottom nearly tripled the light while one at the top
+  changed it by a twentieth. The slider stops at 20%, which is the dimmest duty cycle the panel
+  will actually light -- below it the screen goes black rather than dim.
 - The shipped **Night** profile is set up for a dark room: brightness 20, warmth 100, saturation 35,
   contrast 40, luminance untouched.
 

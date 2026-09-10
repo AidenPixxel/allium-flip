@@ -12,7 +12,7 @@ use common::battery::Battery;
 use common::constants::{
     ALLIUM_GAME_INFO, ALLIUM_LAUNCHER, ALLIUM_SD_ROOT, ALLIUM_VERSION, ALLIUMD_STATE,
     BATTERY_SHUTDOWN_THRESHOLD, BATTERY_UPDATE_INTERVAL, BATTERY_WARNING_THRESHOLD,
-    CHARGE_POWER_OFF_GRACE, MAX_BRIGHTNESS, MAX_VOLUME,
+    CHARGE_POWER_OFF_GRACE, MAX_BRIGHTNESS, MAX_VOLUME, MIN_BRIGHTNESS,
 };
 use common::display::settings::DisplaySettings;
 use common::locale::{Locale, LocaleSettings};
@@ -905,8 +905,9 @@ impl AlliumD<DefaultPlatform> {
 
     fn add_brightness(&mut self, add: i8) -> Result<()> {
         info!("adding brightness: {}", add);
-        self.state.brightness =
-            (self.state.brightness as i8 + add).clamp(0, MAX_BRIGHTNESS as i8) as u8;
+        self.state.brightness = (self.state.brightness as i8 + add)
+            .clamp(MIN_BRIGHTNESS as i8, MAX_BRIGHTNESS as i8)
+            as u8;
         // Draw first, matching add_volume, so the two paths behave the same
         self.show_osd(
             OsdKind::Brightness,

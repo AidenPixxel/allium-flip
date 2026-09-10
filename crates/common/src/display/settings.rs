@@ -8,7 +8,8 @@ use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{
-    ALLIUM_DISPLAY_SETTINGS, PANEL_FLATTEN_THRESHOLD, WARMTH_BLUE_SCALE, WARMTH_GREEN_SCALE,
+    ALLIUM_DISPLAY_SETTINGS, MAX_BRIGHTNESS, MIN_BRIGHTNESS, PANEL_FLATTEN_THRESHOLD,
+    WARMTH_BLUE_SCALE, WARMTH_GREEN_SCALE,
 };
 
 /// How many profiles are kept. The rotate hotkey cycles all of them, so keep it small enough to
@@ -22,9 +23,8 @@ pub const MIN_CONTRAST: u8 = 10;
 /// The backlight a profile gets when it says nothing about one. Resolves to the same duty cycle
 /// the slider's old default did, so an upgrade does not change how bright the device looks.
 pub const DEFAULT_BRIGHTNESS: u8 = 85;
-/// ...and what the shipped Night profile uses: the dimmest the slider could reach before, which
-/// is a comfortable floor for a dark room with plenty of room left below it.
-pub const NIGHT_BRIGHTNESS: u8 = 20;
+/// ...and what the shipped Night profile uses: as dim as the panel will go while still lighting.
+pub const NIGHT_BRIGHTNESS: u8 = MIN_BRIGHTNESS;
 
 /// One full set of panel values, under a name the user chooses.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,6 +250,7 @@ impl DisplaySettings {
         }
         for profile in &mut self.profiles {
             profile.contrast = profile.contrast.max(MIN_CONTRAST);
+            profile.brightness = profile.brightness.clamp(MIN_BRIGHTNESS, MAX_BRIGHTNESS);
             profile.name = truncate_name(&profile.name);
         }
         self.active = self.active.min(self.profiles.len() - 1);
