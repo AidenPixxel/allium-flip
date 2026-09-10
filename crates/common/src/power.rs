@@ -22,6 +22,34 @@ pub struct PowerSettings {
     /// after five minutes.
     #[serde(default = "PowerSettings::default_suspend_shutdown_minutes")]
     pub suspend_shutdown_minutes: i32,
+    /// The CPU clock while a game runs; the launcher and everything else stay at stock.
+    #[serde(default)]
+    pub cpu_clock: CpuClock,
+}
+
+/// The CPU clock while a game runs.
+///
+/// Stock is the kernel as it boots, pinned at 1.2 GHz. The others are MinUI's Normal and
+/// Performance tiers, reached by reprogramming the PLL past what cpufreq offers. Not the per-game
+/// performance modes this fork once had and removed: those only ever capped the clock *below*
+/// stock, which saves nothing on a frame-limited emulator. These go above it.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, FromRepr, Default)]
+pub enum CpuClock {
+    #[default]
+    Stock,
+    Mhz1296,
+    Mhz1488,
+}
+
+impl CpuClock {
+    /// The clock in kHz, the unit cpufreq counts in; `None` leaves the kernel's own alone
+    pub fn khz(self) -> Option<u32> {
+        match self {
+            CpuClock::Stock => None,
+            CpuClock::Mhz1296 => Some(1_296_000),
+            CpuClock::Mhz1488 => Some(1_488_000),
+        }
+    }
 }
 
 /// What happens when the device powers on only because a charger was plugged in.
@@ -75,6 +103,7 @@ impl Default for PowerSettings {
             volume_on_startup: VolumeOnStartup::Restore,
             charging_boot_action: ChargingBootAction::ChargeScreen,
             suspend_shutdown_minutes: PowerSettings::default_suspend_shutdown_minutes(),
+            cpu_clock: CpuClock::Stock,
         }
     }
 }
@@ -124,6 +153,8 @@ mod tests {
         // Five, not zero: zero means Never, which would quietly take away the shutdown that this
         // file's device has been doing after five minutes all along
         assert_eq!(parsed.suspend_shutdown_minutes, 5);
+        // Nobody is overclocked by an update
+        assert_eq!(parsed.cpu_clock, CpuClock::Stock);
 
         // Written while the CPU speed setting existed. The key is now unknown, and it must be
         // ignored rather than rejected -- a rejection here resets the power button, the lid and

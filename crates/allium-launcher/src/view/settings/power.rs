@@ -9,7 +9,9 @@ use common::display::Display as DisplayTrait;
 use common::geom::{Alignment, Point, Rect};
 use common::locale::Locale;
 use common::platform::{DefaultPlatform, Key, KeyEvent, Platform};
-use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
+use common::power::{
+    ChargingBootAction, CpuClock, PowerButtonAction, PowerSettings, VolumeOnStartup,
+};
 use common::resources::Resources;
 use common::stylesheet::Stylesheet;
 use common::view::{ButtonHint, ButtonHints, Label, Number, Select, SettingsList, Toggle, View};
@@ -99,6 +101,10 @@ fn description_key(row: usize, settings: &PowerSettings) -> Option<&'static str>
             VolumeOnStartup::Restore => "settings-power-desc-volume-on-startup-restore",
             VolumeOnStartup::Muted => "settings-power-desc-volume-on-startup-muted",
         }),
+        ROW_CPU_CLOCK => Some(match settings.cpu_clock {
+            CpuClock::Stock => "settings-power-desc-cpu-clock-stock",
+            CpuClock::Mhz1296 | CpuClock::Mhz1488 => "settings-power-desc-cpu-clock-overclock",
+        }),
         ROW_POWER_BUTTON | ROW_LID_CLOSE => match power_action(row, settings) {
             // Handled in `description_text`, which can pass it the delay
             PowerButtonAction::Suspend => None,
@@ -125,7 +131,8 @@ const ROW_SUSPEND_SHUTDOWN: usize = 2;
 const ROW_CHARGING_BOOT: usize = 3;
 const ROW_VOLUME_ON_STARTUP: usize = 4;
 const ROW_POWER_BUTTON: usize = 5;
-const ROW_LID_CLOSE: usize = 6;
+const ROW_CPU_CLOCK: usize = 6;
+const ROW_LID_CLOSE: usize = 7;
 
 /// Powering off is hidden where `shutdown` can only reboot, which would make plugging in a
 /// charger loop the device through boot forever.
@@ -283,6 +290,19 @@ impl Power {
                     Alignment::Right,
                 )),
             ),
+            (
+                locale.t("settings-power-cpu-clock"),
+                Box::new(Select::new(
+                    Point::zero(),
+                    power_settings.cpu_clock as usize,
+                    vec![
+                        locale.t("settings-power-cpu-clock-stock"),
+                        locale.t("settings-power-cpu-clock-1296"),
+                        locale.t("settings-power-cpu-clock-1488"),
+                    ],
+                    Alignment::Right,
+                )),
+            ),
         ];
         if DefaultPlatform::has_lid() {
             buttons.push((
@@ -375,6 +395,10 @@ impl Power {
                     PowerButtonAction::from_repr(val.as_int().unwrap_or(0) as usize)
                         .unwrap_or_default()
             }
+            ROW_CPU_CLOCK => {
+                self.power_settings.cpu_clock =
+                    CpuClock::from_repr(val.as_int().unwrap_or(0) as usize).unwrap_or_default()
+            }
             ROW_LID_CLOSE => {
                 self.power_settings.lid_close_action =
                     PowerButtonAction::from_repr(val.as_int().unwrap_or(0) as usize)
@@ -464,8 +488,11 @@ impl View for Power {
                     Command::ValueChanged(i, val) => {
                         self.apply_value(i, val);
                         self.power_settings.save()?;
-                        // Every remaining row is read by alliumd once at startup
-                        toast_needs_restart_for_effect(&self.res, &commands).await?;
+                        // Every other row is read by alliumd once at startup; the clock is
+                        // re-read at each launch, and its description says so
+                        if i != ROW_CPU_CLOCK {
+                            toast_needs_restart_for_effect(&self.res, &commands).await?;
+                        }
                     }
                     _ => {}
                 }

@@ -16,7 +16,9 @@ use common::constants::{
 };
 use common::display::settings::DisplaySettings;
 use common::locale::{Locale, LocaleSettings};
-use common::power::{ChargingBootAction, PowerButtonAction, PowerSettings, VolumeOnStartup};
+use common::power::{
+    ChargingBootAction, CpuClock, PowerButtonAction, PowerSettings, VolumeOnStartup,
+};
 use common::retroarch::RetroArchCommand;
 use common::state_file;
 use common::stylesheet::Stylesheet;
@@ -98,6 +100,8 @@ pub struct AlliumD<P: Platform> {
     state: AlliumDState,
     locale: Locale,
     power_settings: PowerSettings,
+    /// What the CPU is running at now, so a wake from suspend can put it back
+    cpu_clock: CpuClock,
     osd: Osd<P>,
     /// When the child last exited, within `CRASH_LOOP_WINDOW`; see `throttle_crash_loop`
     child_exits: VecDeque<Instant>,
@@ -341,6 +345,7 @@ impl AlliumD<DefaultPlatform> {
             state,
             locale,
             power_settings,
+            cpu_clock: CpuClock::Stock,
             osd: Osd::new(styles),
             child_exits: VecDeque::new(),
         })
@@ -353,6 +358,9 @@ impl AlliumD<DefaultPlatform> {
             info!("wifi detected, loading wifi settings");
             WiFiSettings::load()?.init()?;
         }
+
+        // The child spawned in `new()` may be a resumed game
+        self.apply_cpu_clock();
 
         info!("starting event loop");
         #[cfg(unix)]
@@ -460,6 +468,7 @@ impl AlliumD<DefaultPlatform> {
                             }
                             self.throttle_crash_loop().await;
                             self.main = respawn_main().await;
+                            self.apply_cpu_clock();
                         }
                     }
                     _ = sigint.recv() => self.handle_quit().await?,
@@ -782,7 +791,44 @@ impl AlliumD<DefaultPlatform> {
 
         info!("waking up from suspend...");
         signal(&self.main, Signal::SIGCONT)?;
-        self.platform.unsuspend(ctx)
+        self.platform.unsuspend(ctx)?;
+        // Flooring the clock for suspend went through cpufreq, which reprogrammed the PLL itself
+        // and does not know about the overclock, so that has to be put back by hand
+        if self.cpu_clock != CpuClock::Stock {
+            self.set_cpu_clock(self.cpu_clock);
+        }
+        Ok(())
+    }
+
+    /// Puts the CPU where the power settings want it for what is running now: overclocked for a
+    /// game, stock for the launcher and everything else. The settings are reloaded first, so the
+    /// row takes effect at the next launch rather than the next boot.
+    ///
+    /// ffplay's launch script pins the `performance` governor itself while it runs, which drops
+    /// the clock back to 1.2 GHz for the length of a video. Acceptable: nothing there needs more.
+    fn apply_cpu_clock(&mut self) {
+        match PowerSettings::load() {
+            Ok(settings) => self.power_settings = settings,
+            Err(e) => warn!("failed to reload the power settings: {}", e),
+        }
+        let clock = if self.is_ingame() {
+            self.power_settings.cpu_clock
+        } else {
+            CpuClock::Stock
+        };
+        self.set_cpu_clock(clock);
+    }
+
+    /// Logs rather than fails: a clock that would not change is not worth a reboot
+    fn set_cpu_clock(&mut self, clock: CpuClock) {
+        if let Err(e) = self.platform.set_cpu_clock(clock) {
+            error!("failed to set the CPU clock to {:?}: {}", clock, e);
+            return;
+        }
+        if clock != self.cpu_clock {
+            info!("CPU clock: {:?}", clock);
+        }
+        self.cpu_clock = clock;
     }
 
     /// Asks RetroArch for an auto-save before the game is stopped.

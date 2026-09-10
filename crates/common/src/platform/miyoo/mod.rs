@@ -22,12 +22,16 @@ use crate::platform::KeyEvent;
 use crate::platform::Platform;
 use crate::platform::miyoo::evdev::EvdevKeys;
 use crate::platform::miyoo::framebuffer::FramebufferDisplay;
+use crate::power::CpuClock;
 
 use self::battery::{Miyoo283Battery, Miyoo354Battery};
 
 pub struct MiyooPlatform {
     model: MiyooDeviceModel,
     keys: EvdevKeys,
+    /// The cpufreq governor the kernel was running before the first overclock, held while one is
+    /// in effect. `None` means the clock is the kernel's own and nothing has to be undone.
+    stock_governor: Option<String>,
 }
 
 pub struct SuspendContext {
@@ -71,6 +75,7 @@ impl Platform for MiyooPlatform {
         Ok(MiyooPlatform {
             model,
             keys: EvdevKeys::new()?,
+            stock_governor: None,
         })
     }
 
@@ -238,6 +243,23 @@ impl Platform for MiyooPlatform {
             .as_bytes(),
         )?;
 
+        Ok(())
+    }
+
+    fn set_cpu_clock(&mut self, clock: CpuClock) -> Result<()> {
+        match clock.khz() {
+            Some(khz) => {
+                let previous = cpu::overclock(khz)?;
+                // Only the first overclock's governor is the one to go back to; a second call
+                // while overclocked would capture `userspace`
+                self.stock_governor.get_or_insert(previous);
+            }
+            None => {
+                if let Some(governor) = self.stock_governor.take() {
+                    cpu::stock(&governor)?;
+                }
+            }
+        }
         Ok(())
     }
 

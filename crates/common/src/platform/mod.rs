@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     battery::Battery,
     display::{Display, settings::DisplayProfile},
+    power::CpuClock,
 };
 
 #[cfg(feature = "miyoo")]
@@ -61,6 +62,12 @@ pub trait Platform {
     fn set_brightness(&mut self, brightness: u8) -> Result<()>;
 
     fn set_display_settings(&mut self, settings: &mut DisplayProfile) -> Result<()>;
+
+    /// Runs the CPU at `clock` until told otherwise. Platforms with no way to do so keep the
+    /// kernel's clock and say nothing.
+    fn set_cpu_clock(&mut self, _clock: CpuClock) -> Result<()> {
+        Ok(())
+    }
 
     fn device_model() -> String;
 
