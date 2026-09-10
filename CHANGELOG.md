@@ -41,16 +41,19 @@ by what changed rather than by run number; the commit log has the detail.
   per-channel floor that capped it was guarding against the panel's grey-flattening, which needs
   *all three* channels below 15 and so could only ever happen to a profile whose own red was that
   low; that case now lifts the whole set proportionally and keeps the tint.
-- **The brightness slider is spaced by ratio, not by difference.** Each step is the same multiple of
-  the last. Previously one step near the bottom nearly tripled the light while one at the top
-  changed it by a twentieth. The slider stops at 20%, which is the dimmest duty cycle the panel
-  will actually light -- below it the screen goes black rather than dim.
-- The shipped **Night** profile is set up for a dark room: brightness 20, warmth 100, saturation 35,
-  contrast 40, luminance untouched.
+- **The brightness slider covers the whole backlight, and every step changes something.** Allium had
+  only ever driven duty cycles 1-100 of a PWM whose period is 800 -- an eighth of what the panel can
+  do -- which left so few integers at the dim end that 20% and 25% were the same setting. The slider
+  now spans the panel's real range: 0% is the dimmest it will light, 100% is full output, brighter
+  than the device has previously gone, and each press is the same multiple of the last. Stored
+  profiles are converted on first load, so nothing looks different until you move a slider.
+- The shipped **Night** profile is set up for a dark room: the dimmest lit backlight, warmth 100,
+  saturation 35, contrast 40, luminance untouched.
 
-**On upgrade:** a given brightness *number* now means less light — nudge it up once and it sticks.
-Warmth 100 is noticeably warmer than it was. Existing profiles that had Dimness above zero become
-dim-backlight profiles; the rest keep the brightness they had.
+**On upgrade:** brightness is converted for you, so the screen looks the same after the update as
+before it — there is simply more range above where you were. Warmth 100 is noticeably warmer than it
+used to be. Profiles that had Dimness above zero become dim-backlight profiles; the rest keep the
+light they had.
 
 - The indicator alliumd draws itself — in the launcher, the in-game menu and Allium's own apps — now
   looks exactly like RetroArch's in-game message: one line of white 2× bitmap text with a black drop

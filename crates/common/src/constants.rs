@@ -86,13 +86,9 @@ pub const SAVE_STATE_IMAGE_WIDTH: u32 = 333;
 
 /// Volume scale is 0..=MAX_VOLUME, mapped to the hardware dB curve at the platform layer.
 pub const MAX_VOLUME: i32 = 20;
-/// Brightness scale is MIN_BRIGHTNESS..=MAX_BRIGHTNESS percent.
+/// Brightness scale is 0..=MAX_BRIGHTNESS percent. Zero is the dimmest the panel still lights,
+/// not off; `screen::set_backlight` is what switches it off.
 pub const MAX_BRIGHTNESS: u8 = 100;
-/// The dimmest the slider goes. Below this the panel does not light at all -- the backlight's duty
-/// cycle gets too short for it -- so there is nothing down there to choose between. This is the
-/// bottom of the range rather than a value to clamp *to*: every number above it keeps meaning
-/// exactly the light it always did.
-pub const MIN_BRIGHTNESS: u8 = 20;
 
 /// The warmth slider cuts green and blue and leaves red alone, so the panel goes amber for playing
 /// in the dark. These are the channel scales at warmth 100; tune them here.

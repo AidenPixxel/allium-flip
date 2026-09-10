@@ -4,7 +4,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use common::command::{Command, Value};
 
-use common::constants::MIN_BRIGHTNESS;
 use common::display::settings::{DisplaySettings, MAX_PROFILE_NAME_LEN, MIN_CONTRAST};
 use common::geom::{Alignment, Point, Rect, Size};
 use common::locale::Locale;
@@ -142,7 +141,7 @@ impl Display {
                 percentage(profile.g, 0),
                 percentage(profile.b, 0),
                 percentage(profile.warmth, 0),
-                percentage(profile.brightness, MIN_BRIGHTNESS),
+                percentage(profile.brightness, 0),
             ],
             styles.ui.ui_font.size + styles.ui.padding_y as u32,
         );
@@ -195,7 +194,7 @@ impl Display {
             ROW_GREEN => settings.active_mut().g = percent(),
             ROW_BLUE => settings.active_mut().b = percent(),
             ROW_WARMTH => settings.active_mut().warmth = percent(),
-            ROW_BRIGHTNESS => settings.active_mut().brightness = percent().max(MIN_BRIGHTNESS),
+            ROW_BRIGHTNESS => settings.active_mut().brightness = percent(),
             _ => return None,
         }
 
@@ -215,7 +214,7 @@ impl Display {
             (ROW_GREEN, profile.g, 0),
             (ROW_BLUE, profile.b, 0),
             (ROW_WARMTH, profile.warmth, 0),
-            (ROW_BRIGHTNESS, profile.brightness, MIN_BRIGHTNESS),
+            (ROW_BRIGHTNESS, profile.brightness, 0),
         ] {
             self.list.set_right(row, percentage(value, min));
         }

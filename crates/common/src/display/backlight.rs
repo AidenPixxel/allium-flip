@@ -1,71 +1,105 @@
 //! Turning the brightness slider into a backlight PWM duty cycle.
 //!
-//! Duty maps to emitted light roughly linearly, but what the eye reads as one step is a ratio, not
-//! a difference. A slider written straight to the duty cycle therefore spends its top half on
-//! changes nobody can see and crams every useful step into the bottom few percent -- which is
-//! exactly the range a dark room lives in. One press near the old floor, 3 to 8, nearly tripled the
-//! light; the same press at the top changed it by a twentieth. These space the steps by ratio, so
-//! every press is the same multiple of the last.
+//! Two things have to be right, and the slider got neither for a long time.
 //!
-//! The bottom of the range is where the panel stops lighting, not where the duty cycle runs out:
-//! below a duty of 3 the screen goes black rather than dim, so `MIN_BRIGHTNESS` ends the slider
-//! there instead of offering settings that show nothing.
+//! It has to cover the panel's range. A 0-100 settings percentage was once written straight into
+//! the duty cycle, against a period of 800 -- so Allium used an eighth of what the backlight can
+//! do, and at the dim end there were barely any integers left to land on: 20% and 25% came out as
+//! the same duty. The curve now spans `DUTY_MIN` to the period itself.
+//!
+//! And its steps have to be even. Duty maps to emitted light roughly linearly, but what the eye
+//! reads as one step is a ratio, not a difference, so a linear slider spends its top half on
+//! changes nobody can see. These space the steps by ratio: every press is the same multiple of the
+//! last, which over 3..800 is about x1.32 per five -- comfortably more than the x1.33 it takes for
+//! consecutive integers to stay distinct from 3 upward.
 
-use crate::constants::{MAX_BRIGHTNESS, MIN_BRIGHTNESS};
+use log::warn;
 
-/// Where the curve is anchored, against the period of 800 the boot script sets. Not reachable:
-/// `MIN_BRIGHTNESS` stops the slider at a duty of 3, because the panel does not light below that.
-/// The anchor stays at 1 so that every slider position keeps the duty it has always mapped to.
-const DUTY_MIN: f32 = 1.0;
-/// The brightest, unchanged from what the slider has always produced at 100.
-const DUTY_MAX: f32 = 100.0;
+/// The dimmest duty the panel actually lights. Below it the screen goes black rather than dim, so
+/// there would be nothing to choose between down there.
+const DUTY_MIN: f32 = 3.0;
 
-/// The duty cycle for a slider position: `MIN_BRIGHTNESS` gives 3, 50 gives 10, 100 gives 100.
-/// Anything below the minimum is raised to it -- there is no darker setting the panel will show.
-pub fn duty_for(brightness: u8) -> u32 {
-    let brightness = brightness.clamp(MIN_BRIGHTNESS, MAX_BRIGHTNESS);
-    let t = f32::from(brightness) / f32::from(MAX_BRIGHTNESS);
-    (DUTY_MIN * (DUTY_MAX / DUTY_MIN).powf(t)).round() as u32
+/// The PWM period the boot script sets, and the fallback when it cannot be read back.
+///
+/// Prefer the value read from the hardware: this exists because `static/.tmp_update/updater` and
+/// this file would otherwise agree only by coincidence, which is how the range came to be capped
+/// at an eighth of the panel in the first place.
+pub const NOMINAL_PERIOD: u32 = 800;
+
+/// Guards against a period so small the curve would invert.
+fn usable_period(period: u32) -> f32 {
+    if period as f32 > DUTY_MIN {
+        period as f32
+    } else {
+        warn!("PWM period {period} is below the panel's floor; using {NOMINAL_PERIOD}");
+        NOMINAL_PERIOD as f32
+    }
+}
+
+/// The duty cycle for a slider position: 0 gives the dimmest lit setting, 100 gives full output.
+pub fn duty_for(brightness: u8, period: u32) -> u32 {
+    let max = usable_period(period);
+    let t = f32::from(brightness.min(100)) / 100.0;
+    (DUTY_MIN * (max / DUTY_MIN).powf(t)).round() as u32
 }
 
 /// The slider position `duty_for` would turn back into `duty`.
 ///
 /// Reading the panel back is how brightness survives suspend, so the two have to agree: if this
-/// returned the raw duty, as it used to, every suspend would resume dimmer than the last.
-pub fn brightness_for(duty: u32) -> u8 {
-    let duty = (duty as f32).clamp(DUTY_MIN, DUTY_MAX);
-    let brightness =
-        ((duty / DUTY_MIN).ln() / (DUTY_MAX / DUTY_MIN).ln() * f32::from(MAX_BRIGHTNESS)).round();
-    (brightness as u8).clamp(MIN_BRIGHTNESS, MAX_BRIGHTNESS)
+/// disagreed with `duty_for`, every suspend would resume at a different brightness than the last.
+pub fn brightness_for(duty: u32, period: u32) -> u8 {
+    let max = usable_period(period);
+    let duty = (duty as f32).clamp(DUTY_MIN, max);
+    ((duty / DUTY_MIN).ln() / (max / DUTY_MIN).ln() * 100.0).round() as u8
+}
+
+/// The slider position that now gives the light an older one used to.
+///
+/// Before this the curve ran over duty 1..100 rather than 3..period, so the same number is far
+/// more light than it was. Stored profiles are put through here once, on load, so a device comes
+/// back from the update looking exactly as it did going in. Uses [`NOMINAL_PERIOD`] rather than
+/// the live period: it is undoing a conversion that was itself written against that value.
+pub fn rescale_from_legacy(old: u8) -> u8 {
+    let legacy_duty = 100f32.powf(f32::from(old.min(100)) / 100.0).round() as u32;
+    brightness_for(legacy_duty, NOMINAL_PERIOD)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const PERIOD: u32 = NOMINAL_PERIOD;
+
     #[test]
-    fn the_ends_are_where_they_should_be() {
-        assert_eq!(duty_for(MIN_BRIGHTNESS), 3, "dimmest the panel will light");
-        assert_eq!(duty_for(100), 100, "the top of the slider is unchanged");
-        assert_eq!(duty_for(50), 10);
+    fn the_ends_are_the_panel_ends() {
+        assert_eq!(duty_for(0, PERIOD), 3, "dimmest the panel will light");
+        assert_eq!(
+            duty_for(100, PERIOD),
+            PERIOD,
+            "the whole range, not an eighth"
+        );
     }
 
     #[test]
-    fn nothing_below_the_minimum_is_darker_than_it() {
-        // Duty 1 and 2 leave the screen black rather than dim, so there is nothing to pick
-        // between down there; the slider ends at the dimmest setting that shows anything.
-        let dimmest = duty_for(MIN_BRIGHTNESS);
-        for brightness in 0..MIN_BRIGHTNESS {
-            assert_eq!(duty_for(brightness), dimmest, "{brightness} went darker");
+    fn every_step_of_five_changes_the_duty() {
+        // The regression this module exists for: 20% and 25% used to be the same setting, and the
+        // old round-trip test tolerated it. Nothing may collapse now.
+        let mut previous = duty_for(0, PERIOD);
+        for brightness in (5..=100u8).step_by(5) {
+            let duty = duty_for(brightness, PERIOD);
+            assert!(
+                duty > previous,
+                "{brightness}% gave {duty}, same as the step below"
+            );
+            previous = duty;
         }
-        assert!(dimmest >= 3);
     }
 
     #[test]
     fn brighter_is_never_dimmer() {
         let mut previous = 0;
         for brightness in 0..=100u8 {
-            let duty = duty_for(brightness);
+            let duty = duty_for(brightness, PERIOD);
             assert!(
                 duty >= previous,
                 "{brightness} gave {duty} after {previous}"
@@ -76,43 +110,56 @@ mod tests {
 
     #[test]
     fn out_of_range_is_clamped_not_wrapped() {
-        assert_eq!(duty_for(u8::MAX), duty_for(100));
-        assert_eq!(brightness_for(0), MIN_BRIGHTNESS, "below the dimmest duty");
-        assert_eq!(
-            brightness_for(1),
-            MIN_BRIGHTNESS,
-            "a duty the panel cannot show"
-        );
-        assert_eq!(brightness_for(10_000), 100, "above the brightest");
+        assert_eq!(duty_for(u8::MAX, PERIOD), duty_for(100, PERIOD));
+        assert_eq!(brightness_for(0, PERIOD), 0, "below the dimmest lit duty");
+        assert_eq!(brightness_for(u32::MAX, PERIOD), 100, "above full output");
     }
 
     #[test]
-    fn a_duty_round_trips_to_its_own_slider_position() {
-        // Suspend saves the duty and restores it through these two; a disagreement would drift
+    fn a_duty_round_trips_so_suspend_cannot_drift() {
         for brightness in 0..=100u8 {
-            let round_tripped = brightness_for(duty_for(brightness));
-            let drift = i32::from(round_tripped) - i32::from(brightness);
-            // Duty is a small integer, so several slider positions share one at the dim end;
-            // landing on the same duty again is what matters, not the exact number
+            let duty = duty_for(brightness, PERIOD);
+            let recovered = brightness_for(duty, PERIOD);
             assert_eq!(
-                duty_for(round_tripped),
-                duty_for(brightness),
-                "{brightness} -> {round_tripped} (drift {drift}) changed the duty"
+                duty_for(recovered, PERIOD),
+                duty,
+                "{brightness}% -> duty {duty} -> {recovered}% changed the duty"
             );
         }
     }
 
     #[test]
-    fn each_step_is_the_same_multiple() {
-        // The whole point: equal presses, equal perceived change. Checked in the upper half,
-        // where the duty is large enough that integer rounding does not dominate.
-        for brightness in (50..=95u8).step_by(5) {
-            let ratio = duty_for(brightness + 5) as f32 / duty_for(brightness) as f32;
-            assert!(
-                (ratio - 1.26).abs() < 0.08,
-                "{brightness} -> {} was a factor of {ratio}",
-                brightness + 5
-            );
+    fn the_curve_follows_whatever_period_the_hardware_reports() {
+        for period in [400u32, 800, 4000] {
+            assert_eq!(duty_for(100, period), period);
+            assert_eq!(duty_for(0, period), 3);
+            let mut previous = duty_for(0, period);
+            for brightness in (5..=100u8).step_by(5) {
+                let duty = duty_for(brightness, period);
+                assert!(duty > previous, "period {period}: {brightness}% collapsed");
+                previous = duty;
+            }
         }
+        // A nonsensical period falls back rather than inverting the curve
+        assert_eq!(duty_for(100, 1), duty_for(100, NOMINAL_PERIOD));
+    }
+
+    #[test]
+    fn the_rescale_keeps_the_light_where_it_was() {
+        // The old curve was duty = 100^(b/100) over 1..100, floored at 3 by the last release.
+        assert_eq!(rescale_from_legacy(20), 0, "the old floor, duty 3");
+        assert_eq!(rescale_from_legacy(85), 50, "the old default, duty 50");
+        assert_eq!(rescale_from_legacy(100), 63, "the old maximum, duty 100");
+
+        let mut previous = 0;
+        for old in 0..=100u8 {
+            let new = rescale_from_legacy(old);
+            assert!(new >= previous, "{old} rescaled below the step under it");
+            previous = new;
+        }
+        assert!(
+            rescale_from_legacy(100) < 100,
+            "the old maximum has to leave headroom above it, or nothing was gained"
+        );
     }
 }
