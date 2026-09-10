@@ -176,6 +176,15 @@ CREATE TABLE IF NOT EXISTS game_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_game_sessions_start_time ON game_sessions(start_time DESC);
 "),
+        // Dead on arrival, and deliberately so. A build of this fork that shipped per-game CPU
+        // speed added this column, and devices that ran it have `user_version = 13`. This list is
+        // replayed against the existing database, and `to_latest` errors when the database is
+        // *ahead* of the binary -- so dropping the entry does not tidy anything up, it stops the
+        // launcher opening the database at all, on precisely the devices that have been updating
+        // all along. An unwritten nullable column costs nothing; a missing migration costs a boot.
+        M::up("
+ALTER TABLE games ADD COLUMN performance_mode INTEGER;
+"),
                 ])
     }
 
@@ -714,6 +723,28 @@ fn map_game(row: &Row<'_>) -> rusqlite::Result<Game> {
 
 #[cfg(test)]
 mod tests {
+    /// The schema version a released build has already put on real devices.
+    ///
+    /// `to_latest` errors when the database is *ahead* of the binary, so the migration list may
+    /// grow but must never shrink past this: a device that ran a later build could not open its
+    /// own database, the launcher would fail to construct, and the daemon would respawn it
+    /// forever behind a black screen. Raise this only alongside a release that shipped the extra
+    /// migration.
+    const RELEASED_SCHEMA_VERSION: usize = 13;
+
+    #[test]
+    fn migrations_never_shrink_below_what_devices_have_run() {
+        let migrations = super::Database::migrations();
+
+        // A database from a device that has been updating all along
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "user_version", RELEASED_SCHEMA_VERSION)
+            .unwrap();
+        migrations.to_latest(&mut conn).expect(
+            "a database at the released schema version must still open -- the migration list has              shrunk, and every device that ran the later build will fail to boot",
+        );
+    }
+
     use super::*;
 
     #[test]
