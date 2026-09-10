@@ -550,7 +550,6 @@ impl AlliumD<DefaultPlatform> {
                         // The plate would keep re-flushing over the menu until its timeout
                         self.hide_osd();
 
-                        self.menu_open = true;
                         if self.menu.tx.send(info).is_err() {
                             error!("failed to send to menu thread");
                             RetroArchCommand::Unpause.send_or_log().await;
