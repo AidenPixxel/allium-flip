@@ -3,6 +3,28 @@
 Every push to `main` that builds is a release, tagged `v<version>-flip.<run>`. This file groups those
 by what changed rather than by run number; the commit log has the detail.
 
+## Unreleased — from MinUI
+
+After a survey of [MinUI](https://github.com/shauninman/MinUI) and
+[MyMinUI](https://github.com/Turro75/MyMinUI). Most of what they do was already here — boot into
+the last game, lid handling, the headphone mute, native 752×560 — or belongs to RetroArch. What
+transferred is about power.
+
+- **Suspend saves the game first.** Suspend was SIGSTOP and a dark panel, and no power path ever
+  asked RetroArch to save; a flat battery or a fall while asleep lost everything since RetroArch's
+  last own auto-save. Now the daemon asks for one first, waits for the file to finish landing and
+  syncs the card before stopping anything. The state is the `.state.auto` that resume reads.
+- **A suspended device draws less.** The panel's power line is pulled low, not just the PWM
+  stopped, and the CPU drops to the cpufreq floor instead of sitting pinned at 1.2 GHz behind a dark
+  panel. Both are put back on wake.
+- **An overclock, as one Power row.** Stock 1.2 GHz, 1.3 GHz or 1.5 GHz for games — MinUI's Normal
+  and Performance tiers, reached the way MinUI reaches them: by reprogramming the SSD202D's MPLL,
+  which is how it gets past the kernel's own table. Default Stock, applied at game launch, undone
+  at exit, re-applied after a wake. Not the removed performance modes, which only ever capped the
+  clock *below* stock.
+- **A fresh install sleeps when the lid shuts.** The default was Shutdown. Existing `power.json`
+  files keep their value.
+
 ## Unreleased — rebuilt on upstream
 
 This fork was rebuilt from [upstream](https://github.com/goweiwen/Allium) `main` rather than carried

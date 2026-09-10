@@ -20,9 +20,12 @@ one device's core set, plus a chosen handful of features. Allium is MIT licensed
 - **A flicker-free in-game indicator.** Volume, brightness and profile changes are handed to
   RetroArch as its own on-screen message while a game is running, because a plate stamped into
   RetroArch's framebuffer cannot be timed not to flicker. Everywhere else keeps the drawn plate.
-- **Power**: how long suspend lasts before powering off, and what happens when a charger wakes a
-  powered-off device — charge screen, charge silently, or stay off, decided before the backlight
-  comes on. Every Power row explains the option you are looking at.
+- **Power**: suspend saves the game before it stops it, then cuts the panel's power and floors the
+  CPU clock, so a flat battery or a fall while asleep loses nothing and the battery lasts. How long
+  suspend lasts before powering off, and what happens when a charger wakes a powered-off device —
+  charge screen, charge silently, or stay off, decided before the backlight comes on. A **CPU
+  Clock** row offers MinUI's 1.3 and 1.5 GHz for games, stock 1.2 by default; the launcher always
+  runs stock. Every Power row explains the option you are looking at.
 - **Wi-Fi that says why it failed**: Searching, Connecting, Getting IP address — then the likely
   cause, rather than "Connecting..." forever.
 - **Updates over Wi-Fi**, no SD card: from the handheld's own Settings → System Update, or pushed
@@ -59,7 +62,8 @@ screen, pushed over Wi-Fi from a computer, or by card.
 - In-game menu: save and load with screenshots, Emulator (RetroArch's own menu),
   [guides](https://github.com/goweiwen/Allium/wiki/In-game-Guide-Walkthrough-Reader), disk changer,
   reset, quit
-- Resume where you left off after a power cycle; suspend; configurable charger-wake behaviour
+- Resume where you left off after a power cycle; suspend that saves the game first; configurable
+  charger-wake behaviour
 - Settings: System Update; Wi-Fi with file server, FTP, SSH, telnet, syncthing and NTP; clock and
   timezone; power; display; theme; language
 
@@ -123,6 +127,15 @@ off, and does not copy that config back when the game exits. Anything changed in
 during a Restart-launched session — hotkeys included — is discarded. Launch with **A** when those
 changes need to persist.
 
+**The screen stays dark after waking from suspend.** Suspend pulls the panel's power line (GPIO4)
+low, as MinUI does, and puts it back on wake, then re-latches the backlight PWM. If a wake ever
+leaves the panel dark, hold Power to shut down; u-boot re-powers the panel on boot. The fallback,
+if it ever proves necessary, is to stop the PWM only.
+
+**A game feels no faster at 1.5 GHz.** The overclock applies only while a game runs, from the next
+launch after the row is changed, and only to CPU-bound cores — a frame-limited emulator that already
+hits full speed has nothing to gain. `allium.log` shows `CPU clock: Mhz1488` when it took effect.
+
 **Other changes made in RetroArch's own menu don't survive closing the game.** RetroArch writes its
 `retroarch.cfg` back only when `config_save_on_exit` is on; cards set up with Onion-derived defaults
 have it off. In RetroArch: Settings → Configuration → **Save Configuration on Quit** → On, then Main
@@ -131,10 +144,10 @@ Menu → Configuration File → **Save Current Configuration** once.
 ## Acknowledgements
 
 Allium is only possible thanks to the Miyoo Mini community, including but not limited to:
-- eggs: RetroArch port, [many code samples](https://www.dropbox.com/sh/hqcsr1h1d7f8nr3/AABtSOygIX_e4mio3rkLetWTa), answering questions on Discord
+- eggs: RetroArch port, [many code samples](https://www.dropbox.com/sh/hqcsr1h1d7f8nr3/AABtSOygIX_e4mio3rkLetWTa), answering questions on Discord, and the MPLL overclock routine this fork ports
 - [Onion team](https://github.com/OnionUI/Onion) (Aemiii91, Schmurtz, Totofaki, and more): maintaining a sane-defaults RetroArch configuration, and the huge village
 - kebabstorm: [Miyoo Mini resources](https://github.com/anzz1/miyoomini-resources)
-- shauninman: Allium is heavily inspired by [MiniUI](https://github.com/shauninman/MiniUI) for its simplicity and clean design
+- shauninman: Allium is heavily inspired by [MiniUI](https://github.com/shauninman/MiniUI) for its simplicity and clean design; this fork's sleep, panel power and CPU clock handling follow [MinUI](https://github.com/shauninman/MinUI)
 - [steward-fu](https://github.com/steward-fu): miraculous DraStic port
 - Early adopters and testers of Allium
 - [Icons8.com](https://icons8.com) for the icons used in the upstream wiki
