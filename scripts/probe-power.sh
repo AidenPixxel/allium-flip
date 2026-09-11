@@ -51,7 +51,12 @@ show() {
 # Run a command that may never exit. `axp_test` is the reason: Allium's own battery code kills it
 # after 100ms rather than waiting, which says it does not reliably exit on its own.
 run_briefly() {
-	if command -v timeout > /dev/null 2>&1; then
+	# busybox's timeout on this device wants `-t SECS` and rejects the bare form with
+	# "can't execute '2'"; GNU's wants the bare form and rejects -t. Try each, then fall back to
+	# doing it by hand, which needs no timeout at all.
+	if timeout -t "$1" true 2> /dev/null; then
+		timeout -t "$1" sh -c "$2" 2>&1
+	elif timeout "$1" true 2> /dev/null; then
 		timeout "$1" sh -c "$2" 2>&1
 	else
 		sh -c "$2" 2>&1 &
@@ -132,10 +137,47 @@ for f in period duty_cycle enable; do
 	show "/sys/class/pwm/pwmchip0/pwm0/$f"
 done
 
-section "What is running"
-ps 2> /dev/null | head -40
+section "What is running (userspace only)"
+# Kernel threads are bracketed; everything unbracketed is something this firmware started.
+ps 2> /dev/null | grep -v '\[' | head -30
 
-if [ "$1" = "idle" ]; then
+if [ "$1" = "volts" ]; then
+	section "Core voltage against frequency"
+	# The only question the read-only probe cannot answer. The Mini+ vendor OPP table puts
+	# 1000MHz at 900mV, but this device reports 1000mV while sitting at 1000MHz -- so either the
+	# Flip's table differs or the driver's temperature policy is holding the rail high. Which
+	# frequency actually drops the rail decides whether a "saver" setting is worth anything:
+	# below the step, energy per unit of work falls with voltage squared; above it, only the
+	# frequency-proportional part moves and a cap saves far less.
+	#
+	# This is the one part of this script that writes. It takes the governor to userspace, walks
+	# the table the kernel itself advertises, and puts the original governor back at the end --
+	# including on Ctrl+C. Do not run it mid-game; the launcher is fine.
+	VOLT=/sys/devices/system/voltage/core/voltage_current
+	CPUFREQ=/sys/devices/system/cpu/cpu0/cpufreq
+	if [ ! -w "$CPUFREQ/scaling_governor" ]; then
+		echo "cannot write scaling_governor -- run this as root"
+	else
+		original=$(cat "$CPUFREQ/scaling_governor")
+		restore_governor() {
+			echo "$original" > "$CPUFREQ/scaling_governor" 2> /dev/null
+			echo "governor restored to $(cat "$CPUFREQ/scaling_governor")"
+		}
+		trap restore_governor EXIT INT TERM
+		echo "governor was: $original"
+		echo userspace > "$CPUFREQ/scaling_governor"
+		echo "requested   reported      core    temp"
+		for f in $(cat "$CPUFREQ/scaling_available_frequencies"); do
+			echo "$f" > "$CPUFREQ/scaling_setspeed" 2> /dev/null
+			sleep 1
+			printf '%-11s %-13s %-7s %s\n' \
+				"$f" \
+				"$(cat "$CPUFREQ/scaling_cur_freq" 2> /dev/null)" \
+				"$(cat "$VOLT" 2> /dev/null | head -1)mV" \
+				"$(cat "$CPUFREQ/temp_out" 2> /dev/null)"
+		done
+	fi
+elif [ "$1" = "idle" ]; then
 	section "Idle wakeups over 10s (do not touch the device)"
 	# How busy the device is while apparently doing nothing. `intr` is the total interrupt count
 	# and the timer interrupt dominates it; the idle jiffies come from /proc/stat's cpu line,
@@ -151,7 +193,7 @@ if [ "$1" = "idle" ]; then
 	echo "context switches: $(awk '/^ctxt/ {print $2}' /proc/stat 2> /dev/null)"
 else
 	echo
-	echo "(run with 'idle' as an argument to add a ten-second wakeup sample)"
+	echo "(run with 'idle' for a ten-second wakeup sample, or 'volts' to find the voltage step)"
 fi
 
 echo
