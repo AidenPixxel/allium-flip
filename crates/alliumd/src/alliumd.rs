@@ -206,18 +206,21 @@ const CRASH_LOOP_WINDOW: std::time::Duration = std::time::Duration::from_secs(10
 /// ...and this many of them means the child is not coming up: pause before the next attempt
 const CRASH_LOOP_EXITS: usize = 3;
 const CRASH_LOOP_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
-/// How often to turn the event loop over when nothing else will.
+/// How often to turn the event loop over when auto-sleep will never do it.
 ///
 /// `BATTERY_UPDATE_INTERVAL` is enforced by an `elapsed()` check at the top of the loop body, not
-/// by a `select!` arm -- so it only runs when something else has woken the loop. While a game is
-/// running that is every keypress, but a device left alone in the launcher wakes for nothing at
-/// all, and the low-battery shutdown along with it: a device with auto-sleep turned off would sit
-/// there until it went flat, which gets no clean shutdown and loses the game. This arm exists to
-/// turn the loop over, and the check at the top decides whether to actually read the battery.
+/// by a `select!` arm -- so it only runs when something else has woken the loop. A running game
+/// wakes it on every keypress, and an idle device is woken by the auto-sleep timer, which powers
+/// it off. But with auto-sleep set to zero nothing wakes it at all, and the low-battery shutdown
+/// never arms: the device sits there until it goes flat, which gets no clean shutdown and loses
+/// the game.
 ///
-/// A minute rather than ten seconds because reading the battery here forks `axp_test`, and the
-/// thing being guarded against -- falling from the 5% threshold to dead -- does not happen inside
-/// a minute.
+/// So this arm is armed *only* in that case. Where auto-sleep is on -- the default, five minutes
+/// -- it is `Duration::MAX` and costs nothing, because the shutdown it guards against is already
+/// happening sooner than the battery could run down.
+///
+/// A minute rather than ten seconds because reading the battery here forks `axp_test`, and falling
+/// from the 5% threshold to dead does not happen inside a minute.
 const IDLE_LOOP_TICK: std::time::Duration = std::time::Duration::from_secs(60);
 /// How often the auto-save is re-measured while it is still being written...
 const SAVE_STATE_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
@@ -432,6 +435,12 @@ impl AlliumD<DefaultPlatform> {
                     0 => std::time::Duration::MAX, // disabled
                     t => std::time::Duration::new(t as u64 * 60, 0),
                 };
+                // See IDLE_LOOP_TICK: only where auto-sleep is not going to wake the loop anyway
+                let idle_tick = if self.power_settings.auto_sleep_duration_minutes == 0 {
+                    IDLE_LOOP_TICK
+                } else {
+                    std::time::Duration::MAX
+                };
                 tokio::select! {
                     key_event = self.platform.poll() => {
                         // A failed myctl spawn on a volume press is not worth a reboot
@@ -445,8 +454,8 @@ impl AlliumD<DefaultPlatform> {
                         }
                     }
                     // Only to turn the loop over; the battery check at the top of the body is
-                    // what acts on it. See IDLE_LOOP_TICK.
-                    _ = tokio::time::sleep(IDLE_LOOP_TICK) => {}
+                    // what acts on it. Never fires unless auto-sleep is off -- see IDLE_LOOP_TICK.
+                    _ = tokio::time::sleep(idle_tick) => {}
                     _ = self.menu.done_rx.recv() => {
                         info!("menu finished, resuming game");
                         self.menu_open = false;
