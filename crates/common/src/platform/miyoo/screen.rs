@@ -2,11 +2,6 @@ use std::fs::{self, File};
 use std::io::Write;
 
 use anyhow::{Context, Result};
-use log::warn;
-use sysfs_gpio::{Direction, Pin};
-
-/// The panel's power line: what u-boot raises before the logo, and what MinUI drives low to sleep
-const PANEL_POWER_GPIO: u64 = 4;
 
 pub fn get_brightness() -> Result<u8> {
     Ok(
@@ -39,35 +34,11 @@ pub fn set_backlight(on: bool) -> Result<()> {
     Ok(())
 }
 
-/// Powers the panel down, or back up.
-///
-/// `set_backlight(false)` stops the PWM, which is the lamp's dimming signal; the panel and its
-/// driver stay powered behind it. This is the rest of the standby saving. The wake sequence is
-/// MinUI's: line high, pin released, then the PWM re-latched by switching it off and on again --
-/// the order it has been running on this hardware with.
-///
-/// The line is exported for the duration and released on wake rather than held, so a second
-/// suspend's export does not fail on a pin that is already exported.
-pub fn set_panel_power(on: bool) -> Result<()> {
-    let pin = Pin::new(PANEL_POWER_GPIO);
-    if on {
-        pin.set_value(1)
-            .context("failed to raise the panel power line")?;
-        if let Err(err) = pin.unexport() {
-            warn!("could not release the panel power line: {err}");
-        }
-        set_backlight(false)?;
-        set_backlight(true)?;
-    } else {
-        pin.export()
-            .context("failed to export the panel power line")?;
-        pin.set_direction(Direction::Out)
-            .context("failed to set the panel power line as an output")?;
-        pin.set_value(0)
-            .context("failed to lower the panel power line")?;
-    }
-    Ok(())
-}
+// No panel-power cut here, deliberately. GPIO4 is MinUI's backlight-power line on the Miyoo
+// Mini, and pulling it low on suspend is the rest of the standby saving there -- but on the
+// MY285 that pin is something else: driving it low powers the device off outright, on the spot,
+// which is what shipping it did. `set_backlight` stopping the PWM is as far as this goes. Do not
+// reintroduce a GPIO write here without first identifying the Flip's own panel-power line.
 
 pub fn blank(blank: bool) -> Result<()> {
     File::create("/proc/mi_modules/fb/mi_fb0")

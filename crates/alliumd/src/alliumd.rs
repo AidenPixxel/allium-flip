@@ -792,8 +792,9 @@ impl AlliumD<DefaultPlatform> {
         info!("waking up from suspend...");
         signal(&self.main, Signal::SIGCONT)?;
         self.platform.unsuspend(ctx)?;
-        // Flooring the clock for suspend went through cpufreq, which reprogrammed the PLL itself
-        // and does not know about the overclock, so that has to be put back by hand
+        // Belt and braces: suspend itself no longer touches cpufreq, but anything that does --
+        // ffplay pinning `performance`, a governor change from a shell -- reprograms the PLL and
+        // knows nothing of the overclock, so state it again rather than assume it survived
         if self.cpu_clock != CpuClock::Stock {
             self.set_cpu_clock(self.cpu_clock);
         }

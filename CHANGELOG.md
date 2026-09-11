@@ -14,9 +14,11 @@ transferred is about power.
   asked RetroArch to save; a flat battery or a fall while asleep lost everything since RetroArch's
   last own auto-save. Now the daemon asks for one first, waits for the file to finish landing and
   syncs the card before stopping anything. The state is the `.state.auto` that resume reads.
-- **A suspended device draws less.** The panel's power line is pulled low, not just the PWM
-  stopped, and the CPU drops to the cpufreq floor instead of sitting pinned at 1.2 GHz behind a dark
-  panel. Both are put back on wake.
+- **Tried and withdrawn: cutting the panel's power and the CPU clock while suspended.** MinUI pulls
+  GPIO4 low to sleep, which is its backlight-power line on the Miyoo Mini. On the MY285 that pin is
+  something else: driving it low powers the device off on the spot, so a single press of Power shut
+  the handheld down instead of suspending it. Both that and the cpufreq floor alongside it are gone
+  again; suspend stops the PWM and nothing more, as it always did.
 - **An overclock, as one Power row.** Stock 1.2 GHz, 1.3 GHz or 1.5 GHz for games — MinUI's Normal
   and Performance tiers, reached the way MinUI reaches them: by reprogramming the SSD202D's MPLL,
   which is how it gets past the kernel's own table. Default Stock, applied at game launch, undone

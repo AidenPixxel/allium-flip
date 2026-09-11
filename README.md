@@ -20,9 +20,8 @@ one device's core set, plus a chosen handful of features. Allium is MIT licensed
 - **A flicker-free in-game indicator.** Volume, brightness and profile changes are handed to
   RetroArch as its own on-screen message while a game is running, because a plate stamped into
   RetroArch's framebuffer cannot be timed not to flicker. Everywhere else keeps the drawn plate.
-- **Power**: suspend saves the game before it stops it, then cuts the panel's power and floors the
-  CPU clock, so a flat battery or a fall while asleep loses nothing and the battery lasts. How long
-  suspend lasts before powering off, and what happens when a charger wakes a powered-off device —
+- **Power**: suspend saves the game before it stops it, so a flat battery or a fall while asleep
+  loses nothing. How long suspend lasts before powering off, and what happens when a charger wakes a powered-off device —
   charge screen, charge silently, or stay off, decided before the backlight comes on. A **CPU
   Clock** row offers MinUI's 1.3 and 1.5 GHz for games, stock 1.2 by default; the launcher always
   runs stock. Every Power row explains the option you are looking at.
@@ -126,11 +125,6 @@ Restart works here: it runs RetroArch against a temporary config with save-state
 off, and does not copy that config back when the game exits. Anything changed in RetroArch's menu
 during a Restart-launched session — hotkeys included — is discarded. Launch with **A** when those
 changes need to persist.
-
-**The screen stays dark after waking from suspend.** Suspend pulls the panel's power line (GPIO4)
-low, as MinUI does, and puts it back on wake, then re-latches the backlight PWM. If a wake ever
-leaves the panel dark, hold Power to shut down; u-boot re-powers the panel on boot. The fallback,
-if it ever proves necessary, is to stop the PWM only.
 
 **A game feels no faster at 1.5 GHz.** The overclock applies only while a game runs, from the next
 launch after the row is changed, and only to CPU-bound cores — a frame-limited emulator that already
