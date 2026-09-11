@@ -206,6 +206,19 @@ const CRASH_LOOP_WINDOW: std::time::Duration = std::time::Duration::from_secs(10
 /// ...and this many of them means the child is not coming up: pause before the next attempt
 const CRASH_LOOP_EXITS: usize = 3;
 const CRASH_LOOP_BACKOFF: std::time::Duration = std::time::Duration::from_secs(5);
+/// How often to turn the event loop over when nothing else will.
+///
+/// `BATTERY_UPDATE_INTERVAL` is enforced by an `elapsed()` check at the top of the loop body, not
+/// by a `select!` arm -- so it only runs when something else has woken the loop. While a game is
+/// running that is every keypress, but a device left alone in the launcher wakes for nothing at
+/// all, and the low-battery shutdown along with it: a device with auto-sleep turned off would sit
+/// there until it went flat, which gets no clean shutdown and loses the game. This arm exists to
+/// turn the loop over, and the check at the top decides whether to actually read the battery.
+///
+/// A minute rather than ten seconds because reading the battery here forks `axp_test`, and the
+/// thing being guarded against -- falling from the 5% threshold to dead -- does not happen inside
+/// a minute.
+const IDLE_LOOP_TICK: std::time::Duration = std::time::Duration::from_secs(60);
 /// How often the auto-save is re-measured while it is still being written...
 const SAVE_STATE_SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 /// ...and how long that is allowed to go on. RetroArch writes a state in 100 KB pieces, one per
@@ -386,8 +399,6 @@ impl AlliumD<DefaultPlatform> {
                 }
             }
 
-            let mut battery_led_task = None;
-
             loop {
                 if battery_interval.elapsed() >= BATTERY_UPDATE_INTERVAL {
                     battery_interval = Instant::now();
@@ -396,27 +407,19 @@ impl AlliumD<DefaultPlatform> {
                         error!("failed to update battery: {}", e);
                     }
 
+                    // No LED blink task here. There was one -- a loop with no exit condition
+                    // waking twice every two seconds for as long as the battery stayed low -- and
+                    // it blinked nothing: `update_led` is an associated function bounded by
+                    // `Self: Sized`, and `impl Battery for Box<dyn Battery>` does not forward it,
+                    // so the call resolved to the trait's empty default body rather than to
+                    // `Miyoo354Battery::update_led`. The platform capability is still there if a
+                    // low-battery light is ever wanted; what is gone is a permanent wakeup, on a
+                    // kernel built without cpuidle, that spent power to announce a shortage of it.
                     if battery.percentage() <= BATTERY_WARNING_THRESHOLD && !battery.charging() {
-                        if battery_led_task.is_none() {
-                            warn!(
-                                "battery is low ({}%), consider charging soon",
-                                battery.percentage()
-                            );
-
-                            battery_led_task = Some(tokio::spawn(async {
-                                loop {
-                                    <DefaultPlatform as Platform>::Battery::update_led(true);
-                                    tokio::time::sleep(std::time::Duration::from_millis(1750))
-                                        .await;
-                                    <DefaultPlatform as Platform>::Battery::update_led(false);
-                                    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-                                }
-                            }));
-                        }
-                    } else if let Some(task) = battery_led_task.take() {
-                        info!("aborting battery LED blink task");
-                        task.abort();
-                        <DefaultPlatform as Platform>::Battery::update_led(false);
+                        warn!(
+                            "battery is low ({}%), consider charging soon",
+                            battery.percentage()
+                        );
                     }
 
                     if battery.percentage() <= BATTERY_SHUTDOWN_THRESHOLD && !battery.charging() {
@@ -441,6 +444,9 @@ impl AlliumD<DefaultPlatform> {
                             error!("failed to update OSD: {}", e);
                         }
                     }
+                    // Only to turn the loop over; the battery check at the top of the body is
+                    // what acts on it. See IDLE_LOOP_TICK.
+                    _ = tokio::time::sleep(IDLE_LOOP_TICK) => {}
                     _ = self.menu.done_rx.recv() => {
                         info!("menu finished, resuming game");
                         self.menu_open = false;
@@ -728,7 +734,12 @@ impl AlliumD<DefaultPlatform> {
                         break;
                     }
                 }
-                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                // Once every BATTERY_UPDATE_INTERVAL, not every second. Reading the battery on
+                // this platform forks `/customer/app/axp_test` and waits up to 100ms for it, and
+                // the only thing this screen does with the answer is notice the cable being
+                // pulled out -- ten seconds late is soon enough to power off, and this loop used
+                // to spawn 3,600 processes an hour to be nine seconds earlier.
+                _ = tokio::time::sleep(BATTERY_UPDATE_INTERVAL) => {
                     battery.update()?;
                     if !battery.charging() {
                         self.platform.shutdown()?;

@@ -2,9 +2,9 @@ use std::fs::File;
 use std::io::Read;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use evdev::{Device, EventStream, EventType};
-use log::info;
+use log::{info, warn};
 
 use crate::constants::MAXIMUM_FRAME_TIME;
 use crate::platform::{DefaultPlatform, Key, KeyEvent, Platform};
@@ -93,12 +93,24 @@ struct LidSwitchPoller {
 
 impl LidSwitchPoller {
     fn new() -> Self {
-        let is_lid_open = read_is_lid_open().expect("Failed to read lid switch state");
+        // Assume open when the sensor cannot be read at all. The alternative -- panicking in a
+        // constructor called from `EvdevKeys::new` -- takes the daemon down at startup, and the
+        // boot script answers a dead daemon by rebooting, so the device would loop.
+        let is_lid_open = read_is_lid_open().unwrap_or_else(|err| {
+            warn!("could not read the lid switch, assuming open: {err}");
+            true
+        });
         Self { is_lid_open }
     }
 
     fn poll(&mut self) -> Option<KeyEvent> {
-        let is_lid_open = read_is_lid_open().expect("Failed to read lid switch state");
+        // A read that fails is reported as no change rather than propagated: this runs from the
+        // input poll, in the daemon, and an error here used to panic -- which reboots the device
+        // by way of the boot script. Keeping the last known state means a genuine lid movement is
+        // picked up on the next pass instead.
+        let Ok(is_lid_open) = read_is_lid_open() else {
+            return None;
+        };
         if is_lid_open != self.is_lid_open {
             self.is_lid_open = is_lid_open;
             if is_lid_open {
@@ -114,7 +126,7 @@ impl LidSwitchPoller {
 
 fn read_is_lid_open() -> Result<bool> {
     let mut file = File::open("/sys/devices/soc0/soc/soc:hall-mh248/hallvalue")
-        .expect("Failed to open /sys/devices/soc0/soc/soc:hall-mh248/hallvalue");
+        .context("opening the hall sensor")?;
     let mut buffer = [0u8; 2];
     file.read_exact(&mut buffer)?;
     Ok(buffer[0] == b'1')
