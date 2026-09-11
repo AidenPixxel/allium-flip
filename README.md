@@ -114,6 +114,11 @@ in a git-ignored `local.mk`.
 ### Debugging on the device
 - `allium.log` at the card root is `alliumd`'s log at `RUST_LOG=info`, readable over the file server
   at `http://<ip>/allium.log`.
+- `scripts/probe-power.sh` reports what the kernel offers for power management — the frequency
+  table and its core voltages, the boot governor, whether suspend-to-RAM exists, which input device
+  the lid is, and whether the battery tool reports current. Read-only; pipe it in over SSH. Add
+  `idle` as an argument for a ten-second sample of how often the CPU is being woken, which is the
+  before/after measurement for any wakeup change.
 - A file called `.debug` at the card root makes the boot script bring up Wi-Fi and telnet and **not**
   reboot when `alliumd` exits — the way out of a reboot loop.
 - Apps → Terminal is a shell on the device.
